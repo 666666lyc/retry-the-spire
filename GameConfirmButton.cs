@@ -35,7 +35,7 @@ internal static class GameConfirmButton
                 if (confirm == null) { orphan.QueueFreeSafely(); continue; }
                 confirm.GetParent()?.RemoveChild(confirm);
                 orphan.QueueFreeSafely();
-                confirm.Name = "RetryConfirmBtn";
+                confirm.Name = "RetryTheSpireConfirmBtn";
                 confirm.Visible = false;
                 confirm.Connect("Released", Callable.From<Node>(_ => onPressed()));
                 return confirm;

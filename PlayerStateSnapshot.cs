@@ -64,7 +64,11 @@ public sealed class RetryTarget
     // entries [act0][..], [act1][0..4].
     public List<List<MegaCrit.Sts2.Core.Runs.History.MapPointHistoryEntry>> MapPointHistorySoFar = new();
 
-    // Player snapshot — for now a single-player retry; we'd extend
-    // this for coop runs later by collecting one per RunHistoryPlayer.
+    // Selected player, retained for the single-player reconstruction
+    // path and for run-level history simulation.
     public PlayerStateSnapshot Player = new();
+
+    // All historical participants. Multiplayer history hosting fills
+    // this list and serializes each player under their original NetId.
+    public List<PlayerStateSnapshot> Players = new();
 }

@@ -20,7 +20,7 @@ namespace Retry;
 [HarmonyPatch(typeof(NGameOverScreen), "_Ready")]
 public static class NGameOverScreen_Ready_Patch
 {
-    private const string ButtonName = "RetryViewActMapsButton";
+    private const string ButtonName = "RetryTheSpireViewActMapsButton";
 
     private static readonly FieldInfo? HistoryField =
         typeof(NGameOverScreen).GetField("_history",
@@ -31,8 +31,8 @@ public static class NGameOverScreen_Ready_Patch
         if (!RetryMod.Enabled) return;
         try
         {
-            if (__instance.HasMeta("retry_gameover_button_wired")) return;
-            __instance.SetMeta("retry_gameover_button_wired", true);
+            if (__instance.HasMeta("retry_the_spire_gameover_button_wired")) return;
+            __instance.SetMeta("retry_the_spire_gameover_button_wired", true);
             AddBanner(__instance);
         }
         catch (Exception ex)

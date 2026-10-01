@@ -31,7 +31,7 @@ namespace Retry;
 [HarmonyPatch(typeof(NRunHistory), "_Ready")]
 public static class NRunHistory_Ready_Patch
 {
-    private const string ButtonName = "RetryViewActMapsButton";
+    private const string ButtonName = "RetryTheSpireViewActMapsButton";
     private const string BannerTexPath  = "res://images/atlases/ui_atlas.sprites/back_button.tres";
     private const string OutlineTexPath = "res://images/atlases/compressed.sprites/back_button_outline.tres";
     private const string KreonBoldTooltipPath = "res://themes/kreon_bold_glyph_space_one.tres";
@@ -44,8 +44,8 @@ public static class NRunHistory_Ready_Patch
         if (!RetryMod.Enabled) return;
         try
         {
-            if (__instance.HasMeta("retry_maps_button_wired")) return;
-            __instance.SetMeta("retry_maps_button_wired", true);
+            if (__instance.HasMeta("retry_the_spire_maps_button_wired")) return;
+            __instance.SetMeta("retry_the_spire_maps_button_wired", true);
             AddBannerButton(__instance);
         }
         catch (Exception ex)

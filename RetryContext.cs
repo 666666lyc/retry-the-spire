@@ -40,4 +40,17 @@ public static class RetryContext
     // relic rewards are rolled from the grab-bag using the relic
     // RNG, producing a different relic than the original.
     public static MegaCrit.Sts2.Core.Models.ModelId? TargetExpectedRelic;
+
+    // Multiplayer history hosting hands a completely native save to
+    // LoadRunLobby. None of the single-player reconstruction hooks may
+    // remain armed once that lobby is opened, because clients without
+    // Retry would not execute the matching override.
+    public static void ResetAll()
+    {
+        IsRetrying = false;
+        SkipNextNeowEntry = false;
+        TargetExpectedRoomType = null;
+        TargetCardChoices = null;
+        TargetExpectedRelic = null;
+    }
 }

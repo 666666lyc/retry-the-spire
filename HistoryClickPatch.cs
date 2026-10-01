@@ -21,8 +21,8 @@ public static class NMapPointHistoryEntry_Ready_Patch
         {
             // _Ready can fire again if the node is reused (e.g. on
             // player switch); tag once so we don't double-wire.
-            if (__instance.HasMeta("retry_click_wired")) return;
-            __instance.SetMeta("retry_click_wired", true);
+            if (__instance.HasMeta("retry_the_spire_click_wired")) return;
+            __instance.SetMeta("retry_the_spire_click_wired", true);
 
             var captured = __instance;
             __instance.Connect(

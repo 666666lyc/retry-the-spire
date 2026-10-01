@@ -58,6 +58,7 @@ public static class NActMapBrowser
     private static readonly List<Type> _poppedSubmenus = new();
     private static Button[]? _tabButtons;
     private static Control? _confirmButton;
+    private static bool _commitInProgress;
     // The map coord the user has highlighted but not yet confirmed.
     // Two-step click flow: 1st click previews, confirm button retries.
     private static MapCoord? _pendingCoord;
@@ -214,7 +215,7 @@ public static class NActMapBrowser
     {
         try
         {
-            var tabs = _hud?.GetNodeOrNull<HBoxContainer>("RetryActTabs");
+            var tabs = _hud?.GetNodeOrNull<HBoxContainer>("RetryTheSpireActTabs");
             var topBar = SpawnedNRun?.GlobalUi?.TopBar;
             if (tabs == null || topBar == null) return;
             tabs.Reparent(topBar);
@@ -319,6 +320,7 @@ public static class NActMapBrowser
             _runState = null;
             _actMaps = null;
             _actVisited = null;
+            _commitInProgress = false;
             GD.Print($"{RetryMod.LogPrefix}browser Close: done in {System.Environment.TickCount64 - t0}ms");
         }
         catch (Exception ex)
@@ -398,7 +400,7 @@ public static class NActMapBrowser
         var rm = RunManager.Instance;
         if (!rm.IsInProgress)
         {
-            rm.SetUpNewSinglePlayer(_runState, shouldSave: false);
+            rm.SetUpNewSingleplayer(_runState, shouldSave: false);
         }
         return true;
     }
@@ -818,7 +820,7 @@ public static class NActMapBrowser
                 confirm.GetParent()?.RemoveChild(confirm);
                 orphan.QueueFreeSafely();
 
-                confirm.Name = "RetryConfirmBtn";
+                confirm.Name = "RetryTheSpireConfirmBtn";
                 confirm.Visible = false;
                 confirm.Connect("Released",
                     Callable.From<Godot.Node>(_ => CommitRetry()));
@@ -905,7 +907,7 @@ public static class NActMapBrowser
             if (_overlay == null) return;
             // The HUD is a sibling of NRun (under our overlay) so it
             // floats above the in-game UI and is freed with the overlay.
-            _hud = new Control { Name = "RetryBrowserHud" };
+            _hud = new Control { Name = "RetryTheSpireBrowserHud" };
             _hud.SetAnchorsAndOffsetsPreset(Control.LayoutPreset.FullRect);
             // Ignore so empty HUD areas don't intercept scroll/click for
             // NMapScreen underneath; child Buttons still get clicks
@@ -917,7 +919,7 @@ public static class NActMapBrowser
             // Game-style act tabs in the top-right of the TopBar
             // (where the timer used to sit). Use cream/gold colors
             // and the game's heavy outline-style font.
-            var tabs = new HBoxContainer { Name = "RetryActTabs" };
+            var tabs = new HBoxContainer { Name = "RetryTheSpireActTabs" };
             tabs.SetAnchorsAndOffsetsPreset(Control.LayoutPreset.TopRight);
             tabs.OffsetLeft = -460; tabs.OffsetRight = -260;
             tabs.OffsetTop = 18; tabs.OffsetBottom = 72;
@@ -940,7 +942,7 @@ public static class NActMapBrowser
                 // Fallback to our own styled button if extraction failed.
                 GD.PrintErr($"{RetryMod.LogPrefix}browser: confirm extract failed, using fallback");
                 _confirmButton = MakeBannerButton("CONFIRM", new Color(0.78f, 0.16f, 0.10f), new Color(1f, 0.30f, 0.18f));
-                _confirmButton.Name = "RetryConfirmBtn";
+                _confirmButton.Name = "RetryTheSpireConfirmBtn";
                 _confirmButton.SetAnchorsAndOffsetsPreset(Control.LayoutPreset.BottomRight);
                 _confirmButton.OffsetLeft = -260; _confirmButton.OffsetRight = -30;
                 _confirmButton.OffsetTop = -90; _confirmButton.OffsetBottom = -30;
@@ -1224,25 +1226,35 @@ public static class NActMapBrowser
             var entries = _history.MapPointHistory[actIdx];
             if (floor >= entries.Count) return;
 
-            // Reconstruct the full historical state at this node — HP,
-            // gold, deck, relics, potions, quests. InventoryInjector
-            // applies via *Internal setters with silent=false so HUD
-            // listeners (NRelicInventory, NPotionContainer) fire and
-            // update their visuals.
-            var snapshot = StateReconstructor.ReconstructAtTarget(_history, actIdx, floor, _player);
-            // silent=true: the browser is a preview, not a live run.
-            // Without it, every preview swap (and every player cycle)
-            // re-plays the card-gain / relic-gain animations for the
-            // entire historical inventory, which is noisy. We refresh
-            // the HUD widgets manually below.
-            InventoryInjector.Apply(_runState, snapshot, silent: true);
+            // Reconstruct every historical participant at this node, not
+            // just the portrait currently selected in the top bar. The
+            // multiplayer player strip reads each live Player directly;
+            // leaving the others untouched made it show their starter
+            // decks/relics until each portrait had been selected once.
+            PlayerStateSnapshot? snapshot = null;
+            foreach (var historicalPlayer in _history.Players)
+            {
+                var playerSnapshot = StateReconstructor.ReconstructAtTarget(
+                    _history, actIdx, floor, historicalPlayer);
+                // silent=true: the browser is a preview, not a live run.
+                // Avoid replaying every card/relic acquisition animation;
+                // the visible HUD widgets are refreshed explicitly below.
+                InventoryInjector.Apply(_runState, playerSnapshot, silent: true);
+                if (historicalPlayer.Id == _player.Id)
+                    snapshot = playerSnapshot;
+            }
+
+            if (snapshot == null)
+                throw new InvalidOperationException(
+                    $"selected historical player {_player.Id} was not reconstructed");
 
             // Force-re-init the topbar scalar widgets (HP/Gold/Deck-count
             // badge). These read directly from player rather than
             // subscribing to scalar-change events, so Initialize is the
             // cleanest way to refresh them.
             var topBar = SpawnedNRun?.GlobalUi?.TopBar;
-            var p = _runState.Players.FirstOrDefault();
+            var p = _runState.Players.FirstOrDefault(x => x.NetId == _player.Id)
+                ?? _runState.Players.FirstOrDefault();
             if (topBar != null && p != null)
             {
                 try { topBar.Hp?.Initialize(p); } catch { }
@@ -1367,6 +1379,7 @@ public static class NActMapBrowser
 
     private static void CommitRetry()
     {
+        if (_commitInProgress) return;
         if (_pendingCoord is not MapCoord coord) return;
         if (_history == null || _player == null || _actVisited == null) return;
         var visited = _actVisited[_currentAct];
@@ -1383,8 +1396,48 @@ public static class NActMapBrowser
         var act = _currentAct;
         GD.Print($"{RetryMod.LogPrefix}browser CONFIRM → retry act={act} floor={floor} coord=({coord.row},{coord.col})");
 
-        void DoRetry()
+        List<MapCoord>? multiplayerPath = null;
+        if (history.Players.Count > 1)
         {
+            var fullPath = _actVisited != null && act < _actVisited.Length
+                ? _actVisited[act]
+                : null;
+            if (fullPath == null)
+            {
+                GD.PrintErr($"{RetryMod.LogPrefix}multiplayer host: reconstructed path unavailable");
+                return;
+            }
+            int targetPathIndex = fullPath.FindIndex(c => c.row == coord.row && c.col == coord.col);
+            if (targetPathIndex < 0)
+            {
+                GD.PrintErr($"{RetryMod.LogPrefix}multiplayer host: selected coord is not on the historical path");
+                return;
+            }
+            multiplayerPath = fullPath.Take(targetPathIndex + 1).ToList();
+        }
+
+        NMainMenu? multiplayerMainMenu = null;
+        ulong multiplayerHostNetId = 0;
+        if (history.Players.Count > 1)
+        {
+            multiplayerMainMenu = FindMainMenu(_hiddenMenu)
+                ?? FindMainMenu(NGame.Instance?.RootSceneContainer?.CurrentScene);
+            multiplayerHostNetId = _savedLocalNetId ?? player.Id;
+        }
+
+        void DoRetry(bool browserAlreadyClosed = false)
+        {
+            if (history.Players.Count > 1)
+            {
+                if (multiplayerPath == null) return;
+                _commitInProgress = true;
+                MultiplayerRetryLauncher.Begin(
+                    history, player, act, floor, coord,
+                    multiplayerPath, multiplayerHostNetId,
+                    multiplayerMainMenu, browserAlreadyClosed);
+                return;
+            }
+
             // Full tear-down via the standard Close path: frees the
             // NRun overlay (which kills our HUD, restores menu, etc.)
             // and lets RetryRunner.Begin transition cleanly.
@@ -1395,15 +1448,54 @@ public static class NActMapBrowser
         // Modal-protect only when there's an actual on-disk save the
         // retry would clobber. IsInProgress can't be used here because
         // the browser itself installs a preview runState via
-        // PrepareRunState's SetUpNewSinglePlayer — that makes
+        // PrepareRunState's SetUpNewSingleplayer — that makes
         // RunManager.IsInProgress=true even though no "real" run is
         // happening, and would unconditionally pop the modal.
-        // hasSave is the right signal: present for menu-with-saved-
-        // run AND mid-run (auto-saved), absent for game-over (we
-        // deleted it in OpenViaMainMenuAsync, or OnEnded did).
-        bool hasSave = MegaCrit.Sts2.Core.Saves.SaveManager.Instance?.HasRunSave == true;
+        // Use the save flag for the slot this retry will actually use;
+        // the single-player and multiplayer slots are independent.
+        // The game intentionally keeps independent active-run slots:
+        // current_run.save (single-player) and current_run_mp.save
+        // (multiplayer). A multiplayer retry must not prompt for, load,
+        // or delete the single-player slot.
+        bool hasSave = history.Players.Count > 1
+            ? MegaCrit.Sts2.Core.Saves.SaveManager.Instance?.HasMultiplayerRunSave == true
+            : MegaCrit.Sts2.Core.Saves.SaveManager.Instance?.HasRunSave == true;
         if (hasSave)
         {
+            if (history.Players.Count > 1)
+            {
+                // NModalContainer.Instance resolves to the preview NRun's
+                // modal layer while View Acts is open. A popup added there
+                // renders behind the browser HUD, so CONFIRM appeared to do
+                // nothing. Capture all launch data above, close the preview,
+                // then wait one frame for its queued free before resolving
+                // the menu's modal container.
+                if (multiplayerMainMenu == null)
+                {
+                    GD.PrintErr($"{RetryMod.LogPrefix}multiplayer host: main menu unavailable for save confirmation");
+                    return;
+                }
+
+                _commitInProgress = true;
+                var tree = multiplayerMainMenu.GetTree();
+                Close();
+                tree.CreateTimer(0.05).Connect("timeout", Callable.From(() =>
+                {
+                    RetryAbandonModal.Show(
+                        title: "Abandon saved multiplayer run?",
+                        body: "Starting this retry will overwrite your existing multiplayer saved run. Your single-player save is not affected.",
+                        onChoice: c =>
+                        {
+                            if (c == RetryAbandonModal.Choice.Cancel) return;
+                            RetryRunner.PerformMultiplayerAbandon(
+                                writeHistory: c == RetryAbandonModal.Choice.AbandonSave,
+                                localPlayerId: multiplayerHostNetId);
+                            DoRetry(browserAlreadyClosed: true);
+                        });
+                }));
+                return;
+            }
+
             // If the on-disk save corresponds to the SAME run we're
             // retrying, the user knows what's there — no need to
             // confront them with a modal. Otherwise it's a different
@@ -1427,6 +1519,25 @@ public static class NActMapBrowser
         {
             DoRetry();
         }
+    }
+
+    internal static void NotifyMultiplayerLaunchFailed()
+    {
+        _commitInProgress = false;
+        if (_confirmButton != null && GodotObject.IsInstanceValid(_confirmButton))
+            _confirmButton.MouseFilter = Control.MouseFilterEnum.Stop;
+    }
+
+    private static NMainMenu? FindMainMenu(Node? root)
+    {
+        if (root == null) return null;
+        if (root is NMainMenu menu) return menu;
+        foreach (Node child in root.GetChildren())
+        {
+            var found = FindMainMenu(child);
+            if (found != null) return found;
+        }
+        return null;
     }
 }
 

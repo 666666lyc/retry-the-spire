@@ -5,9 +5,9 @@
 // having to parse the godot.log stream.
 //
 // Files written:
-//   user://retry_debug_map.json      — newest generated map
-//   user://retry_debug_history.json  — original run's path/types
-//   user://retry_debug_walk.json     — walk decisions per row
+//   user://retry_the_spire_debug_map.json      — newest generated map
+//   user://retry_the_spire_debug_history.json  — original run's path/types
+//   user://retry_the_spire_debug_walk.json     — walk decisions per row
 using System;
 using System.Collections.Generic;
 using Godot;
@@ -60,7 +60,7 @@ public static class DebugDump
                 },
                 ["nodes"] = rows,
             };
-            Write("retry_debug_map.json", Json.Stringify(outer, "  "));
+            Write("retry_the_spire_debug_map.json", Json.Stringify(outer, "  "));
         }
         catch (Exception ex)
         {
@@ -102,7 +102,7 @@ public static class DebugDump
                 ["target_floor"] = floor,
                 ["entries"] = arr,
             };
-            Write("retry_debug_history.json", Json.Stringify(outer, "  "));
+            Write("retry_the_spire_debug_history.json", Json.Stringify(outer, "  "));
         }
         catch (Exception ex)
         {
@@ -127,7 +127,7 @@ public static class DebugDump
                 ["visited_count"] = arr.Count,
                 ["visited"] = arr,
             };
-            Write("retry_debug_visited.json", Json.Stringify(outer, "  "));
+            Write("retry_the_spire_debug_visited.json", Json.Stringify(outer, "  "));
         }
         catch (Exception ex)
         {
@@ -155,7 +155,7 @@ public static class DebugDump
                 ["path"] = nodes,
                 ["notes"] = notesArr,
             };
-            Write("retry_debug_walk.json", Json.Stringify(outer, "  "));
+            Write("retry_the_spire_debug_walk.json", Json.Stringify(outer, "  "));
         }
         catch (Exception ex)
         {

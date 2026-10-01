@@ -2,7 +2,7 @@
 // iterate without manual clicking. Reads a small JSON config from
 // the game's user data dir:
 //
-//   user://retry_test_target.json
+//   user://retry_the_spire_test_target.json
 //   { "enabled": true, "run_file_basename": "1779070640.run",
 //     "act": 0, "floor": 5 }
 //
@@ -59,7 +59,7 @@ public sealed class AutoTestConfig
     {
         try
         {
-            using var f = FileAccess.Open("user://retry_test_target.json", FileAccess.ModeFlags.Read);
+            using var f = FileAccess.Open("user://retry_the_spire_test_target.json", FileAccess.ModeFlags.Read);
             if (f == null) return null;
             var json = f.GetAsText();
             var parser = new Json();

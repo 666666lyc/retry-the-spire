@@ -177,6 +177,50 @@ public static class RetryRunner
         catch (Exception ex) { GD.PrintErr($"{RetryMod.LogPrefix}PerformAbandon: {ex.Message}"); }
     }
 
+    // Multiplayer uses a separate native save slot
+    // (current_run_mp.save). Never route this through PerformAbandon:
+    // that method deliberately targets current_run.save and would erase
+    // an unrelated single-player run. This mirrors the game's own
+    // NMultiplayerSubmenu.TryAbandonMultiplayerRun flow.
+    public static void PerformMultiplayerAbandon(bool writeHistory, ulong localPlayerId)
+    {
+        try
+        {
+            SerializableRun? save = null;
+            var read = SaveManager.Instance?.LoadAndCanonicalizeMultiplayerRunSave(localPlayerId);
+            if (read != null && read.Success)
+                save = read.SaveData;
+
+            if (writeHistory && save != null)
+            {
+                try
+                {
+                    SaveManager.Instance.UpdateProgressWithRunData(save, victory: false);
+                    MegaCrit.Sts2.Core.Runs.RunHistoryUtilities.CreateRunHistoryEntry(
+                        save, victory: false, isAbandoned: true, save.PlatformType);
+                }
+                catch (Exception ex)
+                {
+                    GD.PrintErr($"{RetryMod.LogPrefix}multiplayer abandon write history: {ex.Message}");
+                }
+            }
+
+            try { SaveManager.Instance?.DeleteCurrentMultiplayerRun(); }
+            catch (Exception ex)
+            {
+                GD.PrintErr($"{RetryMod.LogPrefix}abandon DeleteCurrentMultiplayerRun: {ex.Message}");
+            }
+
+            GD.Print(
+                $"{RetryMod.LogPrefix}multiplayer abandon: " +
+                $"writeHistory={writeHistory} localPlayerId={localPlayerId}");
+        }
+        catch (Exception ex)
+        {
+            GD.PrintErr($"{RetryMod.LogPrefix}PerformMultiplayerAbandon: {ex.Message}");
+        }
+    }
+
     private static void BeginInternal(
         RunHistory history,
         RunHistoryPlayer player,

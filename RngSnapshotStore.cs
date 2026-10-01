@@ -4,7 +4,7 @@
 // which (col,row) the original player visited at floor N — the
 // MapPointHistoryEntry doesn't carry coord info.
 //
-// File: user://retry_rng_snapshots.json
+// File: user://retry_the_spire_rng_snapshots.json
 // Schema v2:
 //   {
 //     "version": 2,
@@ -33,7 +33,8 @@ namespace Retry;
 
 public static class RngSnapshotStore
 {
-    private const string FileName = "retry_rng_snapshots.json";
+    private const string FileName = "retry_the_spire_rng_snapshots.json";
+    private const string LegacyFileName = "retry_rng_snapshots.json";
     private const int SchemaVersion = 2;
 
     public sealed class Entry
@@ -97,9 +98,9 @@ public static class RngSnapshotStore
     private static string KeyFor(string seed, int actIndex, int floor) =>
         $"{seed}|{actIndex}|{floor}";
 
-    private static string FilePath()
+    private static string FilePath(string fileName = FileName)
     {
-        return "user://" + FileName;
+        return "user://" + fileName;
     }
 
     private static void EnsureLoaded()
@@ -108,9 +109,19 @@ public static class RngSnapshotStore
         _cache = new Dictionary<string, Entry>();
         try
         {
-            using var f = FileAccess.Open(FilePath(), FileAccess.ModeFlags.Read);
+            bool importedLegacy = false;
+            var f = FileAccess.Open(FilePath(), FileAccess.ModeFlags.Read);
+            if (f == null)
+            {
+                // One-way, non-destructive compatibility import from the
+                // upstream Retry filename. The legacy file remains intact;
+                // subsequent writes go only to Retry the Spire's own file.
+                f = FileAccess.Open(FilePath(LegacyFileName), FileAccess.ModeFlags.Read);
+                importedLegacy = f != null;
+            }
             if (f == null) return;
-            var json = f.GetAsText();
+            string json;
+            using (f) json = f.GetAsText();
             if (string.IsNullOrEmpty(json)) return;
             var parser = new Json();
             if (parser.Parse(json) != Error.Ok) return;
@@ -136,6 +147,11 @@ public static class RngSnapshotStore
                         }
                     }
                     _cache[key.AsString()] = entry;
+                }
+                if (importedLegacy)
+                {
+                    GD.Print($"{RetryMod.LogPrefix}imported legacy Retry RNG snapshots without modifying the original file");
+                    TrySave();
                 }
             }
             else

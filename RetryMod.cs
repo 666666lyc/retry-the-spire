@@ -14,8 +14,8 @@ namespace Retry;
 [ModInitializer("Initialize")]
 public static class RetryMod
 {
-    public const string Version = "0.1.0";
-    public const string LogPrefix = "[Retry] ";
+    public const string Version = "0.2.0";
+    public const string LogPrefix = "[Retry the Spire] ";
 
     public static bool Enabled = true;
 
@@ -26,7 +26,7 @@ public static class RetryMod
         GD.Print($"{LogPrefix}v{Version} initializing...");
         try
         {
-            _harmony = new Harmony("austin.retry");
+            _harmony = new Harmony("retrythespire.mod");
             ModHelpers.TryPatchAll(_harmony, typeof(RetryMod).Assembly, LogPrefix);
         }
         catch (Exception ex)

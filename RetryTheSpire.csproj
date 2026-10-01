@@ -2,8 +2,11 @@
   <PropertyGroup>
     <TargetFramework>net9.0</TargetFramework>
     <OutputType>Library</OutputType>
-    <AssemblyName>Retry</AssemblyName>
+    <AssemblyName>RetryTheSpire</AssemblyName>
     <RootNamespace>Retry</RootNamespace>
+    <PackageId>RetryTheSpire</PackageId>
+    <Version>0.2.0</Version>
+    <PackageLicenseExpression>MIT</PackageLicenseExpression>
     <Nullable>enable</Nullable>
     <LangVersion>12.0</LangVersion>
 

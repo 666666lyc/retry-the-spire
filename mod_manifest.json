@@ -1,10 +1,10 @@
 {
-  "id": "Retry",
-  "name": "Retry",
-  "author": "austin",
-  "description": "Click any node on a past run in the run history to resume that run from that point — fresh seed-matched custom run with your deck, relics, HP, and gold restored.",
-  "version": "0.1.2",
+  "id": "RetryTheSpire",
+  "name": "Retry the Spire",
+  "author": "666666lyc (fork maintainer); original by Austin/sts2mods",
+  "description": "Resume past runs from any visited node. Multiplayer history runs open a native Standard load-game lobby; only the host needs Retry the Spire installed.",
+  "version": "0.2.0",
   "has_pck": false,
   "has_dll": true,
-  "affects_gameplay": true
+  "affects_gameplay": false
 }
