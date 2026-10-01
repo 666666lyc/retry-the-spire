@@ -3,7 +3,7 @@
   "name": "Retry the Spire",
   "author": "666666lyc (fork maintainer); original by Austin/sts2mods",
   "description": "Resume past runs from any visited node. Multiplayer history runs open a native Standard load-game lobby; only the host needs Retry the Spire installed.",
-  "version": "0.2.0",
+  "version": "0.2.1",
   "has_pck": false,
   "has_dll": true,
   "affects_gameplay": false

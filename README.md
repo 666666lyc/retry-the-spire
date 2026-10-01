@@ -39,7 +39,7 @@ progress restored.
 
 ## Installation
 
-Download `RetryTheSpire-v0.2.0.zip` from the GitHub Releases page and extract
+Download `RetryTheSpire-v0.2.1.zip` from the GitHub Releases page and extract
 it into the game's `mods` directory. The final layout must be:
 
 ```text

@@ -251,7 +251,14 @@ internal static class MultiplayerRetryLauncher
             save.Ascension = history.Ascension;
             save.CurrentActIndex = actIndex;
             save.PlatformType = history.PlatformType;
-            save.StartTime = history.StartTime;
+
+            // StartTime is the native run identity, not merely display
+            // metadata. Reusing the source history's value makes the next
+            // startup treat current_run_mp.save as stale because a history
+            // file with that StartTime already exists, so the game deletes
+            // the resumable multiplayer save. Give the retry its own identity
+            // while RunTimeOffset continues to preserve the historical timer.
+            save.StartTime = CreateRetryStartTime(history.StartTime);
             save.PreFinishedRoom = null;
             save.VisitedMapCoords = new List<MapCoord>(pathThroughTarget);
 
@@ -332,11 +339,21 @@ internal static class MultiplayerRetryLauncher
         var actualIds = save.Players.Select(p => p.NetId).OrderBy(x => x).ToArray();
         if (!expectedIds.SequenceEqual(actualIds))
             throw new InvalidOperationException("generated save player ids differ from the history record");
+        if (save.StartTime == history.StartTime)
+            throw new InvalidOperationException("generated save reused the source history run identity");
         if (save.VisitedMapCoords.Count == 0)
             throw new InvalidOperationException("generated save has no target coordinate");
         var last = save.VisitedMapCoords[save.VisitedMapCoords.Count - 1];
         if (last.row != targetCoord.row || last.col != targetCoord.col)
             throw new InvalidOperationException("generated save does not end at the selected coordinate");
+    }
+
+    private static long CreateRetryStartTime(long sourceStartTime)
+    {
+        long retryStartTime = DateTimeOffset.UtcNow.ToUnixTimeSeconds();
+        return retryStartTime == sourceStartTime
+            ? checked(retryStartTime + 1)
+            : retryStartTime;
     }
 
     private static List<List<MapPointHistoryEntry>> TruncateHistoryIncludingTarget(

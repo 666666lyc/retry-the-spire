@@ -11,16 +11,20 @@
 // our substitute list. The Prefix is one-shot — clears the context
 // after firing so subsequent rewards (if any) use vanilla RNG.
 //
+// The full SerializableCard must be loaded, rather than recreating
+// the card from its ModelId and upgrade count. Reward cards can carry
+// persistent state such as Silken Tress' Glam enchantment and
+// card-specific SavedProperties. Recreating only the canonical model
+// made those historical properties disappear from the retried reward.
+//
 // Limitations:
 //   • Only forces the target room's reward, not rewards from prior
 //     floors (those didn't happen — we skipped them).
 //   • If a card in history is no longer in ModelDb (modded run), we
 //     warn and skip; the reward falls back to whatever RNG produces.
-//   • CardCreationOptions still flows through Hook.TryModify... so
-//     relic-driven mutations (e.g. "rare cards more likely") still
-//     get applied to our substitute list. Probably fine — the
-//     player's relics at retry-time match historical relics, so
-//     the modifications are the same.
+//   • The forced cards already contain the historical result of any
+//     relic-driven mutation. The original reward pipeline is skipped
+//     so one-shot effects such as Silken Tress are not applied twice.
 using System.Collections.Generic;
 using System.Linq;
 using Godot;
@@ -49,23 +53,19 @@ public static class CardFactory_CreateForReward_Patch
         foreach (var sc in forced.Take(cardCount))
         {
             if (sc.Id == null) continue;
-            var canonical = ModelDb.GetByIdOrNull<CardModel>(sc.Id);
-            if (canonical == null)
+            if (ModelDb.GetByIdOrNull<CardModel>(sc.Id) == null)
             {
                 GD.PrintErr($"{RetryMod.LogPrefix}force card-reward: id {sc.Id} not in ModelDb — skipping");
                 continue;
             }
-            // CreateCard mints the per-combat instance (with upgrade
-            // level applied). We use the player's CombatState scope
-            // so the reward attaches to the active combat.
             try
             {
-                var card = player.Creature.CombatState.CreateCard(canonical, player);
-                for (int u = 0; u < sc.CurrentUpgradeLevel; u++)
-                {
-                    try { card.UpgradeInternal(); }
-                    catch { break; }
-                }
+                // IRunState.LoadCard restores the complete serialized
+                // payload: upgrade level, enchantment (including amount),
+                // SavedProperties, and FloorAddedToDeck. The returned card
+                // belongs to the live run scope and is not added to the deck
+                // until the player actually chooses it.
+                var card = player.RunState.LoadCard(sc, player);
                 list.Add(new CardCreationResult(card));
             }
             catch (System.Exception ex)

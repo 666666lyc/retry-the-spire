@@ -5,10 +5,14 @@
     <AssemblyName>RetryTheSpire</AssemblyName>
     <RootNamespace>Retry</RootNamespace>
     <PackageId>RetryTheSpire</PackageId>
-    <Version>0.2.0</Version>
+    <Version>0.2.1</Version>
     <PackageLicenseExpression>MIT</PackageLicenseExpression>
     <Nullable>enable</Nullable>
     <LangVersion>12.0</LangVersion>
+    <Deterministic>true</Deterministic>
+    <ContinuousIntegrationBuild>true</ContinuousIntegrationBuild>
+    <PathMap>$(MSBuildProjectDirectory)=/_/RetryTheSpire</PathMap>
+    <IncludeSourceRevisionInInformationalVersion>false</IncludeSourceRevisionInInformationalVersion>
 
     <STS2GameDir Condition="'$(STS2GameDir)' == '' and $([System.Runtime.InteropServices.RuntimeInformation]::IsOSPlatform($([System.Runtime.InteropServices.OSPlatform]::OSX)))">$(HOME)/Library/Application Support/Steam/steamapps/common/Slay the Spire 2</STS2GameDir>
     <STS2GameDir Condition="'$(STS2GameDir)' == ''">D:\SteamLibrary\steamapps\common\Slay the Spire 2</STS2GameDir>
