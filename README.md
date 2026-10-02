@@ -30,6 +30,12 @@ progress restored.
 - Adds **重打** to the in-run pause menu. Single-player reloads the
   native room-entry save immediately; multiplayer hosts reopen that save in
   the native load-run lobby so unmodded friends can rejoin.
+- During an in-run multiplayer restart, teammates running v0.4.3 or newer are
+  verified over a dedicated reliable control channel before the old lobby is
+  closed. They automatically find the replacement lobby and ready up. If a
+  compatible teammate does not acknowledge within three seconds, the live run
+  stays connected and the host chooses whether to cancel or continue with
+  manual rejoining.
 
 ## Limitations
 
@@ -42,7 +48,7 @@ progress restored.
 
 ## Installation
 
-Download `RetryTheSpire-v0.3.1.zip` from the GitHub Releases page and extract
+Download `RetryTheSpire-v0.4.3.zip` from the GitHub Releases page and extract
 it into the game's `mods` directory. The final layout must be:
 
 ```text

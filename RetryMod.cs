@@ -14,7 +14,7 @@ namespace Retry;
 [ModInitializer("Initialize")]
 public static class RetryMod
 {
-    public const string Version = "0.3.1";
+    public const string Version = "0.4.3";
     public const string LogPrefix = "[Retry the Spire] ";
 
     public static bool Enabled = true;
@@ -28,6 +28,7 @@ public static class RetryMod
         {
             _harmony = new Harmony("retrythespire.mod");
             ModHelpers.TryPatchAll(_harmony, typeof(RetryMod).Assembly, LogPrefix);
+            MultiplayerRestartCoordinator.RegisterMessageType();
         }
         catch (Exception ex)
         {

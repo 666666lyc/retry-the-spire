@@ -26,6 +26,8 @@ public static class QuickRoomRestart
 {
     private static bool _restartInProgress;
     private static bool _liveRunCleaned;
+    private static SerializableRun? _preparedMultiplayerSave;
+    private static ulong _preparedMultiplayerHostId;
 
     public static bool CanRestart(out bool multiplayer)
     {
@@ -53,7 +55,72 @@ public static class QuickRoomRestart
         if (_restartInProgress) return;
         _restartInProgress = true;
         _liveRunCleaned = false;
-        _ = RestartAsync();
+        if (CanRestart(out bool multiplayer) && multiplayer)
+            _ = PrepareMultiplayerRestartAsync();
+        else
+            _ = RestartAsync();
+    }
+
+    internal static void ContinueAfterPreparation()
+    {
+        var save = _preparedMultiplayerSave;
+        ulong hostId = _preparedMultiplayerHostId;
+        _preparedMultiplayerSave = null;
+        _preparedMultiplayerHostId = 0;
+        if (save == null || hostId == 0)
+        {
+            ShowError("多人续局存档尚未准备完成，已取消本次重打。", resetGuard: true);
+            return;
+        }
+        _ = RestartPreparedMultiplayerSafelyAsync(save, hostId);
+    }
+
+    internal static void CancelPreparation()
+    {
+        _restartInProgress = false;
+        _liveRunCleaned = false;
+        _preparedMultiplayerSave = null;
+        _preparedMultiplayerHostId = 0;
+    }
+
+    private static async Task PrepareMultiplayerRestartAsync()
+    {
+        try
+        {
+            if (!CanRestart(out bool multiplayer) || !multiplayer)
+            {
+                ShowError("当前对局没有可用的多人本关入口存档，无法重打。", resetGuard: true);
+                return;
+            }
+
+            var saveManager = SaveManager.Instance;
+            if (saveManager?.CurrentRunSaveTask is { } pendingSave)
+                await pendingSave;
+
+            ulong hostId = LocalContext.NetId ?? 0;
+            if (hostId == 0)
+            {
+                ShowError("无法确定房主玩家 ID，不能安全重建多人续局大厅。", resetGuard: true);
+                return;
+            }
+
+            var read = saveManager!.LoadAndCanonicalizeMultiplayerRunSave(hostId);
+            if (!read.Success || read.SaveData == null)
+            {
+                ShowError($"读取多人入口存档失败：{read.Status}", resetGuard: true);
+                return;
+            }
+
+            _preparedMultiplayerSave = read.SaveData;
+            _preparedMultiplayerHostId = hostId;
+            GD.Print($"{RetryMod.LogPrefix}quick restart: multiplayer room-entry save prepared before handshake");
+            MultiplayerRestartCoordinator.BeginHostPreparation();
+        }
+        catch (Exception ex)
+        {
+            GD.PrintErr($"{RetryMod.LogPrefix}quick restart preflight failed: {ex.Message}\n{ex.StackTrace}");
+            ShowError($"重打准备失败：{ex.Message}", resetGuard: true);
+        }
     }
 
     private static async Task RestartAsync()
@@ -70,25 +137,7 @@ public static class QuickRoomRestart
             if (saveManager?.CurrentRunSaveTask is { } pendingSave)
                 await pendingSave;
 
-            if (multiplayer)
-            {
-                ulong hostId = LocalContext.NetId ?? 0;
-                if (hostId == 0)
-                {
-                    ShowError("无法确定房主玩家 ID，不能安全重建多人续局大厅。", resetGuard: true);
-                    return;
-                }
-                var read = saveManager!.LoadAndCanonicalizeMultiplayerRunSave(hostId);
-                if (!read.Success || read.SaveData == null)
-                {
-                    ShowError($"读取多人入口存档失败：{read.Status}", resetGuard: true);
-                    return;
-                }
-
-                GD.Print($"{RetryMod.LogPrefix}quick restart: multiplayer room-entry save loaded");
-                await RestartMultiplayerAsync(read.SaveData, hostId);
-            }
-            else
+            if (!multiplayer)
             {
                 var read = saveManager!.LoadRunSave();
                 if (!read.Success || read.SaveData == null)
@@ -109,6 +158,10 @@ public static class QuickRoomRestart
 
                 GD.Print($"{RetryMod.LogPrefix}quick restart: single-player room-entry save loaded");
                 await RestartSingleplayerAsync(restored, read.SaveData);
+            }
+            else
+            {
+                ShowError("多人重打准备状态异常，已取消本次重打。", resetGuard: true);
             }
         }
         catch (Exception ex)
@@ -144,7 +197,7 @@ public static class QuickRoomRestart
         _restartInProgress = false;
     }
 
-    private static async Task RestartMultiplayerAsync(
+    private static async Task RestartPreparedMultiplayerAsync(
         SerializableRun save,
         ulong hostId)
     {
@@ -152,19 +205,47 @@ public static class QuickRoomRestart
         try { await game.Transition.FadeOut(0.2f); } catch { }
 
         RetryContext.ResetAll();
-        RunManager.Instance.CleanUp(graceful: true);
+        // A graceful Steam host shutdown delays closing its listen socket.
+        // Starting the replacement host during that delay lets the old cleanup
+        // close the new listener, leaving a visible but unreachable lobby.
+        RunManager.Instance.CleanUp(graceful: false);
         _liveRunCleaned = true;
         LocalContext.NetId = hostId;
+        await game.ToSignal(game.GetTree(), SceneTree.SignalName.ProcessFrame);
 
         var menu = NMainMenu.Create(openTimeline: false);
         game.RootSceneContainer?.SetCurrentScene(menu);
         await game.ToSignal(game.GetTree(), SceneTree.SignalName.ProcessFrame);
 
         var submenu = menu.OpenMultiplayerSubmenu();
+        MultiplayerRestartCoordinator.ArmHostAutoStart();
         submenu.StartHost(save);
         try { await game.Transition.FadeIn(0.2f); } catch { }
         GD.Print($"{RetryMod.LogPrefix}quick restart: multiplayer load lobby requested");
         _restartInProgress = false;
+    }
+
+    private static async Task RestartPreparedMultiplayerSafelyAsync(
+        SerializableRun save,
+        ulong hostId)
+    {
+        try
+        {
+            await RestartPreparedMultiplayerAsync(save, hostId);
+        }
+        catch (Exception ex)
+        {
+            GD.PrintErr($"{RetryMod.LogPrefix}quick restart failed: {ex.Message}\n{ex.StackTrace}");
+            if (_liveRunCleaned)
+            {
+                await EnsureMainMenuAfterFailureAsync();
+                ShowError("重打加载失败，但本关入口存档仍然保留。请从主菜单继续游戏。", resetGuard: true);
+            }
+            else
+            {
+                ShowError($"重打加载失败：{ex.Message}", resetGuard: true);
+            }
+        }
     }
 
     private static async Task EnsureMainMenuAfterFailureAsync()
@@ -184,7 +265,13 @@ public static class QuickRoomRestart
     private static void ShowError(string body, bool resetGuard)
     {
         GD.PrintErr($"{RetryMod.LogPrefix}quick restart: {body}");
-        if (resetGuard) _restartInProgress = false;
+        if (resetGuard)
+        {
+            if (!_liveRunCleaned) MultiplayerRestartCoordinator.AbortBeforeDisconnect();
+            _restartInProgress = false;
+            _preparedMultiplayerSave = null;
+            _preparedMultiplayerHostId = 0;
+        }
         OneButtonNotice.Show("重打", body, "知道了", () => { });
     }
 }
