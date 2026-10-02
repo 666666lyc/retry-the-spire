@@ -42,6 +42,7 @@ public sealed class RetryTarget
 {
     // Run-level metadata
     public string Seed = "";
+    public long SourceStartTime;
     public int Ascension;
     public GameMode GameMode = GameMode.Standard;
     public List<ModelId> ActIds = new();

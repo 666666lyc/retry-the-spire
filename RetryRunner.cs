@@ -259,6 +259,7 @@ public static class RetryRunner
             var target = new RetryTarget
             {
                 Seed = history.Seed,
+                SourceStartTime = history.StartTime,
                 Ascension = history.Ascension,
                 GameMode = history.GameMode,
                 ActIds = new List<ModelId>(history.Acts),
@@ -489,6 +490,32 @@ public static class RetryRunner
         {
             wantedTypes.Add(actHistory[i].MapPointType);
         }
+
+        var exactHints = new Dictionary<int, MapCoord>();
+        var legacyHints = new Dictionary<int, MapCoord>();
+        for (int floor = 0; floor <= targetFloor; floor++)
+        {
+            var exact = RngSnapshotStore.TryGetExactCoord(
+                target.SourceStartTime, target.Seed, target.TargetActIndex, floor);
+            if (exact.HasValue) exactHints[floor] = exact.Value;
+            var legacy = RngSnapshotStore.TryGetLegacyCoord(
+                target.Seed, target.TargetActIndex, floor);
+            if (legacy.HasValue) legacyHints[floor] = legacy.Value;
+        }
+
+        if (exactHints.Count == wantedTypes.Count)
+        {
+            var coords = Enumerable.Range(0, wantedTypes.Count).Select(i => exactHints[i]).ToList();
+            if (MapPathSearch.TryBuildCoordinatePath(map, coords, out var coordinatePath, out var coordinateFailure))
+            {
+                walkNotes.Add($"v3 coords: validated path of {coordinatePath.Count} coords");
+                DebugDump.DumpWalk(coordinatePath, walkNotes);
+                await EnterAtPath(runState, target, coordinatePath, dfsExact: true);
+                return;
+            }
+            walkNotes.Add($"v3 coords: rejected ({coordinateFailure})");
+        }
+
         var dfsPath = MapPathSearch.FindPath(map, wantedTypes);
         if (dfsPath != null && dfsPath.Count > 0)
         {
@@ -498,7 +525,24 @@ public static class RetryRunner
             await EnterAtPath(runState, target, dfsPath, dfsExact: true);
             return;
         }
-        walkNotes.Add("dfs: no exact-type path found, falling back to greedy walk");
+        walkNotes.Add("dfs: no exact-type path found, trying closest complete legal path");
+
+        var closest = MapPathSearch.FindClosestPath(map, wantedTypes, exactHints, legacyHints);
+        if (closest != null && closest.Path.Count > 0 && closest.Complete)
+        {
+            walkNotes.Add(
+                $"closest: length={closest.Path.Count}/{wantedTypes.Count} " +
+                $"typeMismatches={closest.TypeMismatches} exactCoordMatches={closest.ExactCoordinateMatches} " +
+                $"legacyCoordMatches={closest.LegacyCoordinateMatches} complete={closest.Complete}");
+            foreach (var mp in closest.Path)
+                walkNotes.Add($"  ({mp.coord.row},{mp.coord.col},{mp.PointType})");
+            DebugDump.DumpWalk(closest.Path, walkNotes);
+            await EnterAtPath(runState, target, closest.Path, dfsExact: false);
+            return;
+        }
+        if (closest != null)
+            walkNotes.Add($"closest: incomplete path {closest.Path.Count}/{wantedTypes.Count}; refusing target navigation");
+        walkNotes.Add("closest: no legal path found, falling back to greedy walk");
 
         // Determine whether history's first entry corresponds to the
         // StartingMapPoint or to a row-1 node. Act 0 with Neow makes
@@ -524,7 +568,8 @@ public static class RetryRunner
         // somewhere the live graph doesn't connect to.
         MapPoint? PickFromSnapshot(MapPoint cur, MapPointType wantType, int floor)
         {
-            var snapCoord = RngSnapshotStore.TryGetCoord(target.Seed, target.TargetActIndex, floor);
+            var snapCoord = RngSnapshotStore.TryGetCoord(
+                target.SourceStartTime, target.Seed, target.TargetActIndex, floor);
             if (snapCoord == null) return null;
             foreach (var c in cur.Children)
             {
@@ -611,8 +656,32 @@ public static class RetryRunner
         catch (Exception ex) { GD.PrintErr($"{RetryMod.LogPrefix}simulate queues: {ex.Message}"); }
 
         var targetCoord = path[path.Count - 1].coord;
+        try
+        {
+            long destinationStartTime = RngSnapshotStore.GetCurrentRunStartTime();
+            for (int act = 0; act < target.TargetActIndex
+                && act < target.MapPointHistorySoFar.Count; act++)
+            {
+                RngSnapshotStore.CopyExactCoordinates(
+                    target.SourceStartTime, destinationStartTime, target.Seed,
+                    act, target.MapPointHistorySoFar[act].Count);
+            }
+            RngSnapshotStore.CaptureCoordinates(
+                destinationStartTime, target.Seed, target.TargetActIndex,
+                path.Select(point => point.coord).ToList());
+        }
+        catch (Exception ex)
+        {
+            GD.PrintErr($"{RetryMod.LogPrefix}seed retry coordinates: {ex.Message}");
+        }
+
         bool snapshotApplied = false;
-        try { snapshotApplied = RngSnapshotStore.TryApplyLive(runState.Rng, target.Seed, target.TargetActIndex, target.TargetFloorIndex); }
+        try
+        {
+            snapshotApplied = RngSnapshotStore.TryApplyLive(
+                runState.Rng, target.SourceStartTime, target.Seed,
+                target.TargetActIndex, target.TargetFloorIndex);
+        }
         catch (Exception ex) { GD.PrintErr($"{RetryMod.LogPrefix}snapshot apply: {ex.Message}"); }
 
         // If the target's MapPointType is Unknown, force the

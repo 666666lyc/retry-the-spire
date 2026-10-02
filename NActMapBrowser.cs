@@ -478,7 +478,52 @@ public static class NActMapBrowser
         var entries = _history.MapPointHistory[actIdx];
         var typeChain = new List<MapPointType>();
         foreach (var e in entries) typeChain.Add(e.MapPointType);
-        var path = MapPathSearch.FindPath(map, typeChain);
+
+        var exactHints = new Dictionary<int, MapCoord>();
+        var legacyHints = new Dictionary<int, MapCoord>();
+        for (int floor = 0; floor < entries.Count; floor++)
+        {
+            var exact = RngSnapshotStore.TryGetExactCoord(
+                _history.StartTime, _history.Seed, actIdx, floor);
+            if (exact.HasValue) exactHints[floor] = exact.Value;
+            var legacy = RngSnapshotStore.TryGetLegacyCoord(_history.Seed, actIdx, floor);
+            if (legacy.HasValue) legacyHints[floor] = legacy.Value;
+        }
+
+        List<MapPoint>? path = null;
+        if (exactHints.Count == entries.Count)
+        {
+            var coords = Enumerable.Range(0, entries.Count).Select(i => exactHints[i]).ToList();
+            if (MapPathSearch.TryBuildCoordinatePath(map, coords, out var coordinatePath, out var failure))
+            {
+                path = coordinatePath;
+                GD.Print($"{RetryMod.LogPrefix}browser act {actIdx}: restored {path.Count} exact v3 coordinates");
+            }
+            else
+            {
+                GD.PrintErr($"{RetryMod.LogPrefix}browser act {actIdx}: v3 coordinate chain rejected: {failure}");
+            }
+        }
+
+        path ??= MapPathSearch.FindPath(map, typeChain);
+        if (path == null)
+        {
+            var closest = MapPathSearch.FindClosestPath(map, typeChain, exactHints, legacyHints);
+            if (closest != null)
+            {
+                path = closest.Path;
+                string mismatches = string.Join(", ", path
+                    .Select((point, floor) => (point, floor))
+                    .Where(x => x.floor < typeChain.Count && x.point.PointType != typeChain[x.floor])
+                    .Select(x => $"{x.floor}:{typeChain[x.floor]}→{x.point.PointType}"));
+                GD.PrintErr(
+                    $"{RetryMod.LogPrefix}browser act {actIdx}: exact history path unavailable; " +
+                    $"best legal path length={path.Count}/{entries.Count} " +
+                    $"typeMismatches={closest.TypeMismatches} exactCoordMatches={closest.ExactCoordinateMatches} " +
+                    $"legacyCoordMatches={closest.LegacyCoordinateMatches} complete={closest.Complete}" +
+                    (mismatches.Length > 0 ? $" [{mismatches}]" : ""));
+            }
+        }
         var visited = new List<MapCoord>();
         if (path != null)
             foreach (var n in path) visited.Add(n.coord);

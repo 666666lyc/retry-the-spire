@@ -3,6 +3,8 @@ bin/
 obj/
 out/
 dist/
+.dotnet/
+.dotnet-home/
 
 # Editor
 *.user

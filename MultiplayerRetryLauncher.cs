@@ -13,6 +13,7 @@ using MegaCrit.Sts2.Core.Map;
 using MegaCrit.Sts2.Core.Models;
 using MegaCrit.Sts2.Core.Nodes;
 using MegaCrit.Sts2.Core.Nodes.Screens.MainMenu;
+using MegaCrit.Sts2.Core.Rooms;
 using MegaCrit.Sts2.Core.Runs;
 using MegaCrit.Sts2.Core.Runs.History;
 using MegaCrit.Sts2.Core.Saves;
@@ -23,6 +24,21 @@ namespace Retry;
 
 internal static class MultiplayerRetryLauncher
 {
+    private sealed class NativeSaveBuildResult
+    {
+        public required SerializableRun Save;
+        public string? TargetRoomWarning;
+    }
+
+    private sealed class TargetRoomContract
+    {
+        public required MapPointType HistoricalPointType;
+        public RoomType? HistoricalRoomType;
+        public MapPointType? ExpectedSavedPointType;
+        public bool UsesForcedUnknownOdds;
+        public string? Warning;
+    }
+
     private static readonly FieldInfo? MapHistoryField = typeof(RunState).GetField(
         "_mapPointHistory", BindingFlags.Instance | BindingFlags.NonPublic);
 
@@ -57,9 +73,10 @@ internal static class MultiplayerRetryLauncher
                 browserClosed = true;
             }
 
-            var save = BuildNativeSave(
+            var build = BuildNativeSave(
                 history, target, actIndex, floorIndex,
                 targetCoord, pathThroughTarget, hostNetId);
+            var save = build.Save;
 
             RetryContext.ResetAll();
             GD.Print(
@@ -77,9 +94,25 @@ internal static class MultiplayerRetryLauncher
                 {
                     RetryContext.ResetAll();
                     LocalContext.NetId = hostNetId;
-                    var submenu = mainMenu.OpenMultiplayerSubmenu();
-                    submenu.StartHost(save);
-                    GD.Print($"{RetryMod.LogPrefix}native multiplayer load lobby requested");
+                    void StartLobby()
+                    {
+                        var submenu = mainMenu.OpenMultiplayerSubmenu();
+                        submenu.StartHost(save);
+                        GD.Print($"{RetryMod.LogPrefix}native multiplayer load lobby requested");
+                    }
+
+                    if (!string.IsNullOrWhiteSpace(build.TargetRoomWarning))
+                    {
+                        OneButtonNotice.Show(
+                            "房间类型还原警告",
+                            build.TargetRoomWarning + "\n\n仍将继续创建房间。",
+                            "继续开房",
+                            StartLobby);
+                    }
+                    else
+                    {
+                        StartLobby();
+                    }
                 }
                 catch (Exception ex)
                 {
@@ -143,6 +176,7 @@ internal static class MultiplayerRetryLauncher
         var target = new RetryTarget
         {
             Seed = history.Seed,
+            SourceStartTime = history.StartTime,
             Ascension = history.Ascension,
             GameMode = GameMode.Standard,
             ActIds = new List<ModelId>(history.Acts),
@@ -167,7 +201,7 @@ internal static class MultiplayerRetryLauncher
         return target;
     }
 
-    private static SerializableRun BuildNativeSave(
+    private static NativeSaveBuildResult BuildNativeSave(
         RunHistory history,
         RetryTarget target,
         int actIndex,
@@ -235,12 +269,14 @@ internal static class MultiplayerRetryLauncher
             try
             {
                 RngSnapshotStore.TryApplyLive(
-                    runState.Rng, target.Seed, actIndex, floorIndex);
+                    runState.Rng, target.SourceStartTime, target.Seed, actIndex, floorIndex);
             }
             catch (Exception ex)
             {
                 GD.PrintErr($"{RetryMod.LogPrefix}multiplayer RNG snapshot: {ex.Message}");
             }
+
+            var roomContract = ApplyTargetRoomContract(runState, target, targetCoord);
 
             RunTimeOffset.Apply(target);
             var save = RunManager.Instance.ToSave(preFinishedRoom: null);
@@ -262,8 +298,27 @@ internal static class MultiplayerRetryLauncher
             save.PreFinishedRoom = null;
             save.VisitedMapCoords = new List<MapCoord>(pathThroughTarget);
 
+            for (int act = 0; act < actIndex && act < target.MapPointHistorySoFar.Count; act++)
+            {
+                RngSnapshotStore.CopyExactCoordinates(
+                    target.SourceStartTime, save.StartTime, target.Seed,
+                    act, target.MapPointHistorySoFar[act].Count);
+            }
+            RngSnapshotStore.CaptureCoordinates(
+                save.StartTime, target.Seed, actIndex, pathThroughTarget);
+
             ValidateNativeSave(save, history, targetCoord);
-            return save;
+            var serializedWarning = ValidateSerializedTargetRoomContract(
+                save, actIndex, targetCoord, roomContract);
+            var warning = CombineWarnings(roomContract.Warning, serializedWarning);
+            if (warning != null)
+                GD.PrintErr($"{RetryMod.LogPrefix}multiplayer target room fallback: {warning}");
+
+            return new NativeSaveBuildResult
+            {
+                Save = save,
+                TargetRoomWarning = warning,
+            };
         }
         finally
         {
@@ -273,6 +328,212 @@ internal static class MultiplayerRetryLauncher
             NActMapBrowser.NetServiceNetIdOverride = null;
             LocalContext.NetId = hostNetId;
         }
+    }
+
+    private static TargetRoomContract ApplyTargetRoomContract(
+        RunState runState,
+        RetryTarget target,
+        MapCoord targetCoord)
+    {
+        var contract = new TargetRoomContract
+        {
+            HistoricalPointType = MapPointType.Unassigned,
+        };
+
+        if (target.MapPointHistorySoFar.Count <= target.TargetActIndex
+            || target.MapPointHistorySoFar[target.TargetActIndex].Count <= target.TargetFloorIndex)
+        {
+            contract.Warning = "历史记录中缺少目标层信息，无法校验房间类型。";
+            return contract;
+        }
+
+        var entry = target.MapPointHistorySoFar[target.TargetActIndex][target.TargetFloorIndex];
+        contract.HistoricalPointType = entry.MapPointType;
+        if (entry.Rooms != null && entry.Rooms.Count > 0)
+            contract.HistoricalRoomType = entry.Rooms[0].RoomType;
+
+        var map = runState.Map;
+        var point = map?.GetAllMapPoints().FirstOrDefault(p => SameCoord(p.coord, targetCoord));
+        if (point == null)
+        {
+            contract.Warning = $"生成地图中找不到目标坐标 ({targetCoord.row},{targetCoord.col})，无法固化历史房间类型。";
+            return contract;
+        }
+
+        var generatedType = point.PointType;
+        if (entry.MapPointType != MapPointType.Unknown)
+        {
+            point.PointType = entry.MapPointType;
+            contract.ExpectedSavedPointType = entry.MapPointType;
+            GD.Print(
+                $"{RetryMod.LogPrefix}target room contract: " +
+                $"coord=({targetCoord.row},{targetCoord.col}) historicalPoint={entry.MapPointType} " +
+                $"historicalRoom={contract.HistoricalRoomType?.ToString() ?? "?"} " +
+                $"generated={generatedType} final={point.PointType}");
+            return contract;
+        }
+
+        contract.ExpectedSavedPointType = MapPointType.Unknown;
+        if (!contract.HistoricalRoomType.HasValue)
+        {
+            contract.Warning = "历史问号节点没有记录实际房间类型，无法固定本次结果。";
+            return contract;
+        }
+
+        point.PointType = MapPointType.Unknown;
+        var desired = contract.HistoricalRoomType.Value;
+        if (!TryForceUnknownOdds(runState, point, desired, out var reason))
+        {
+            contract.Warning = reason;
+        }
+        else
+        {
+            contract.UsesForcedUnknownOdds = true;
+        }
+
+        GD.Print(
+            $"{RetryMod.LogPrefix}target room contract: " +
+            $"coord=({targetCoord.row},{targetCoord.col}) historicalPoint=Unknown " +
+            $"historicalRoom={desired} generated={generatedType} final={point.PointType} " +
+            $"forcedOdds={contract.UsesForcedUnknownOdds}");
+        return contract;
+    }
+
+    private static bool TryForceUnknownOdds(
+        RunState runState,
+        MapPoint point,
+        RoomType desired,
+        out string? reason)
+    {
+        reason = null;
+        if (desired is not (RoomType.Event or RoomType.Monster or RoomType.Elite
+            or RoomType.Treasure or RoomType.Shop))
+        {
+            reason = $"历史问号节点实际解析为 {desired}，当前游戏无法用问号房概率表达该类型。";
+            return false;
+        }
+
+        try
+        {
+            MapPointHistoryEntry? previous = null;
+            var history = runState.MapPointHistory;
+            if (history.Count > runState.CurrentActIndex
+                && history[runState.CurrentActIndex].Count > 0)
+            {
+                previous = history[runState.CurrentActIndex][history[runState.CurrentActIndex].Count - 1];
+            }
+
+            if (previous != null)
+            {
+                var blacklist = RunManager.BuildRoomTypeBlacklist(previous, point.Children);
+                if (blacklist.Contains(desired))
+                {
+                    reason = $"历史房间类型 {desired} 被当前版本的问号房规则排除，无法保证还原。";
+                    return false;
+                }
+            }
+
+            var odds = runState.Odds.UnknownMapPoint;
+            odds.MonsterOdds = desired == RoomType.Monster ? 1f : 0f;
+            odds.EliteOdds = desired == RoomType.Elite ? 1f : 0f;
+            odds.TreasureOdds = desired == RoomType.Treasure ? 1f : 0f;
+            odds.ShopOdds = desired == RoomType.Shop ? 1f : 0f;
+
+            bool deterministic = desired switch
+            {
+                RoomType.Event => odds.EventOdds >= 0.999f,
+                RoomType.Monster => odds.MonsterOdds >= 0.999f,
+                RoomType.Elite => odds.EliteOdds >= 0.999f,
+                RoomType.Treasure => odds.TreasureOdds >= 0.999f,
+                RoomType.Shop => odds.ShopOdds >= 0.999f,
+                _ => false,
+            };
+            if (!deterministic)
+            {
+                reason = $"当前版本没有接受 {desired} 的确定性问号房概率。";
+                return false;
+            }
+            return true;
+        }
+        catch (Exception ex)
+        {
+            reason = $"设置问号房概率时发生错误：{ex.Message}";
+            return false;
+        }
+    }
+
+    private static string? ValidateSerializedTargetRoomContract(
+        SerializableRun save,
+        int actIndex,
+        MapCoord targetCoord,
+        TargetRoomContract contract)
+    {
+        try
+        {
+            if (actIndex < 0 || actIndex >= save.Acts.Count)
+                return "生成存档缺少目标幕，无法验证房间类型。";
+            var savedMap = save.Acts[actIndex].SavedMap;
+            if (savedMap == null)
+                return "生成存档缺少目标地图，无法验证房间类型。";
+
+            var savedPoint = savedMap.Points.FirstOrDefault(p => SameCoord(p.Coord, targetCoord));
+            if (savedPoint == null && savedMap.StartingPoint != null
+                && SameCoord(savedMap.StartingPoint.Coord, targetCoord))
+                savedPoint = savedMap.StartingPoint;
+            if (savedPoint == null && savedMap.BossPoint != null
+                && SameCoord(savedMap.BossPoint.Coord, targetCoord))
+                savedPoint = savedMap.BossPoint;
+            if (savedPoint == null)
+                return "生成存档中找不到目标地图点，无法验证房间类型。";
+
+            GD.Print(
+                $"{RetryMod.LogPrefix}serialized target room: " +
+                $"coord=({targetCoord.row},{targetCoord.col}) point={savedPoint.PointType} " +
+                $"historicalPoint={contract.HistoricalPointType} " +
+                $"historicalRoom={contract.HistoricalRoomType?.ToString() ?? "?"}");
+
+            if (contract.ExpectedSavedPointType.HasValue
+                && savedPoint.PointType != contract.ExpectedSavedPointType.Value)
+            {
+                return $"目标地图点序列化为 {savedPoint.PointType}，历史要求为 {contract.ExpectedSavedPointType.Value}。";
+            }
+
+            if (contract.HistoricalPointType == MapPointType.Unknown
+                && contract.UsesForcedUnknownOdds)
+            {
+                var odds = save.SerializableOdds;
+                var desired = contract.HistoricalRoomType;
+                bool valid = desired switch
+                {
+                    RoomType.Event => odds.UnknownMapPointMonsterOddsValue == 0f
+                        && odds.UnknownMapPointEliteOddsValue == 0f
+                        && odds.UnknownMapPointTreasureOddsValue == 0f
+                        && odds.UnknownMapPointShopOddsValue == 0f,
+                    RoomType.Monster => odds.UnknownMapPointMonsterOddsValue >= 0.999f,
+                    RoomType.Elite => odds.UnknownMapPointEliteOddsValue >= 0.999f,
+                    RoomType.Treasure => odds.UnknownMapPointTreasureOddsValue >= 0.999f,
+                    RoomType.Shop => odds.UnknownMapPointShopOddsValue >= 0.999f,
+                    _ => false,
+                };
+                if (!valid)
+                    return $"目标问号房的 {desired} 概率未被正确写入存档。";
+            }
+            return null;
+        }
+        catch (Exception ex)
+        {
+            return $"验证目标房间类型时发生错误：{ex.Message}";
+        }
+    }
+
+    private static bool SameCoord(MapCoord a, MapCoord b)
+        => a.row == b.row && a.col == b.col;
+
+    private static string? CombineWarnings(string? first, string? second)
+    {
+        if (string.IsNullOrWhiteSpace(first)) return string.IsNullOrWhiteSpace(second) ? null : second;
+        if (string.IsNullOrWhiteSpace(second) || string.Equals(first, second, StringComparison.Ordinal)) return first;
+        return first + "\n" + second;
     }
 
     private static void PopulateCompletedHistory(

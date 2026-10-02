@@ -27,6 +27,9 @@ progress restored.
   modifiers, so the game applies its normal multiplayer ascension rules.
 - Keeps the game's independent single-player and multiplayer save slots
   separate.
+- Adds **重打** to the in-run pause menu. Single-player reloads the
+  native room-entry save immediately; multiplayer hosts reopen that save in
+  the native load-run lobby so unmodded friends can rejoin.
 
 ## Limitations
 
@@ -39,7 +42,7 @@ progress restored.
 
 ## Installation
 
-Download `RetryTheSpire-v0.2.1.zip` from the GitHub Releases page and extract
+Download `RetryTheSpire-v0.3.1.zip` from the GitHub Releases page and extract
 it into the game's `mods` directory. The final layout must be:
 
 ```text

@@ -14,7 +14,7 @@ namespace Retry;
 [ModInitializer("Initialize")]
 public static class RetryMod
 {
-    public const string Version = "0.2.0";
+    public const string Version = "0.3.1";
     public const string LogPrefix = "[Retry the Spire] ";
 
     public static bool Enabled = true;

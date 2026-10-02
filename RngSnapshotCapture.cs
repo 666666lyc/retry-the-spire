@@ -41,7 +41,14 @@ public static class RunState_AddVisitedMapCoord_Patch
             int floor = __instance.MapPointHistory.Count > __instance.CurrentActIndex
                 ? __instance.MapPointHistory[__instance.CurrentActIndex].Count
                 : 0;
-            RngSnapshotStore.Capture(rng.StringSeed, __instance.CurrentActIndex, floor, coord, counters);
+            long startTime = RngSnapshotStore.GetCurrentRunStartTime();
+            if (startTime <= 0)
+            {
+                GD.PrintErr($"{RetryMod.LogPrefix}snapshot capture skipped: run start time unavailable");
+                return;
+            }
+            RngSnapshotStore.Capture(
+                startTime, rng.StringSeed, __instance.CurrentActIndex, floor, coord, counters);
         }
         catch (Exception ex)
         {

@@ -2,8 +2,8 @@
   "id": "RetryTheSpire",
   "name": "Retry the Spire",
   "author": "666666lyc (fork maintainer); original by Austin/sts2mods",
-  "description": "Resume past runs from any visited node. Multiplayer history runs open a native Standard load-game lobby; only the host needs Retry the Spire installed.",
-  "version": "0.2.1",
+  "description": "Resume past runs from visited nodes and quickly restart the current room. Multiplayer retries use the native load-game lobby; only the host needs the mod.",
+  "version": "0.3.1",
   "has_pck": false,
   "has_dll": true,
   "affects_gameplay": false
