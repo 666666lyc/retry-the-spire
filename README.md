@@ -31,15 +31,15 @@ progress restored.
   modifiers, so the game applies its normal multiplayer ascension rules.
 - Keeps the game's independent single-player and multiplayer save slots
   separate.
-- Adds **重打** to the in-run pause menu. Single-player reloads the
-  native room-entry save immediately; multiplayer hosts reopen that save in
-  the native load-run lobby so unmodded friends can rejoin.
-- During an in-run multiplayer restart, teammates running v0.4.3 or newer are
-  verified over a dedicated reliable control channel before the old lobby is
-  closed. They automatically find the replacement lobby and ready up. If a
-  compatible teammate does not acknowledge within three seconds, the live run
-  stays connected and the host chooses whether to cancel or continue with
-  manual rejoining.
+- Adds **重打** to the in-run pause menu. Single-player reloads the native
+  room-entry save immediately. When every connected multiplayer peer runs
+  v0.4.4 or newer, all peers reload that save directly while keeping the
+  current network connection and never opening the load-run lobby.
+- If an in-run multiplayer restart includes an unmodded or older peer, it uses
+  the native replacement lobby. An all-v0.4.4 direct attempt also falls back
+  there automatically if a peer does not respond. Players running v0.4.3 or
+  newer automatically find that lobby and ready up; unmodded players can
+  rejoin manually.
 
 ## Limitations
 
@@ -52,7 +52,7 @@ progress restored.
 
 ## Installation
 
-Download `RetryTheSpire-v0.4.3.zip` from the GitHub Releases page and extract
+Download `RetryTheSpire-v0.4.4.zip` from the GitHub Releases page and extract
 it into the game's `mods` directory. The final layout must be:
 
 ```text
@@ -108,8 +108,8 @@ Retry the Spire 可以从已到访的地图节点重新开始《杀戮尖塔 2�
 - 仅多人模式房主需要安装 Retry the Spire。客户端通过游戏正常的 `LoadRunLobby` 流程接收原生存档。
 - 多人历史对局大厅保持为 `GameMode.Standard`，不附加自定义修改项，因此游戏会应用正常的多人进阶规则。
 - 保持游戏的单人和多人存档槽相互独立。
-- 在对局中的暂停菜单加入 **重打**。单人模式会立即读取进入当前房间时的原生存档；多人模式房主则会在原生读取对局大厅中重新打开该存档，让未安装此模组的好友也能重新加入。
-- 在多人对局中重打时，v0.4.3 或更高版本会先通过专用的可靠控制通道确认队友兼容，再关闭旧大厅。兼容的队友会自动找到新大厅并准备。如果兼容队友未在三秒内响应，当前对局将保持连接，由房主选择取消重打，或继续并让队友手动重新加入。
+- 在对局中的暂停菜单加入 **重打**。单人模式会立即读取进入当前房间时的原生存档；多人模式下，如果所有在线玩家均使用 v0.4.4 或更高版本，则所有玩家会保留当前网络连接并直接重载，不进入读取对局大厅。
+- 多人重打中如果存在未安装模组或版本较旧的玩家，则使用原生替换大厅；全员 v0.4.4 的直载尝试中若有玩家未响应，也会自动降级到该大厅。使用 v0.4.3 或更高版本的玩家会自动找到新大厅并准备，未安装模组的玩家仍可手动重新加入。
 
 ### 已知限制
 
@@ -120,7 +120,7 @@ Retry the Spire 可以从已到访的地图节点重新开始《杀戮尖塔 2�
 
 ### 安装
 
-从 GitHub Releases 页面下载 `RetryTheSpire-v0.4.3.zip`，并解压到游戏的 `mods` 目录中。最终目录结构必须如下：
+从 GitHub Releases 页面下载 `RetryTheSpire-v0.4.4.zip`，并解压到游戏的 `mods` 目录中。最终目录结构必须如下：
 
 ```text
 mods/

@@ -24,6 +24,7 @@ using MegaCrit.Sts2.Core.Nodes.Screens.CharacterSelect;
 using MegaCrit.Sts2.Core.Nodes.Screens.MainMenu;
 using MegaCrit.Sts2.Core.Platform;
 using MegaCrit.Sts2.Core.Runs;
+using MegaCrit.Sts2.Core.Saves;
 
 namespace Retry;
 
@@ -36,6 +37,10 @@ internal enum RestartControlKind : byte
     PrepareAck = 5,
     Cancel = 6,
     CommitRestart = 7,
+    DirectCapability = 8,
+    DirectPrepareAck = 9,
+    DirectCommit = 10,
+    UseLobbyFallback = 11,
 }
 
 /// <summary>A dedicated reliable message used only between compatible mod peers.</summary>
@@ -79,9 +84,66 @@ internal sealed class RestartControlMessage : INetMessage
     }
 }
 
+/// <summary>
+/// Carries the native room-entry save only between v0.4.4+ peers.  Keep this
+/// type after <see cref="RestartControlMessage"/> in the message table so the
+/// legacy control message retains its v0.4.3 wire id.
+/// </summary>
+internal sealed class DirectRestartPayloadMessage : INetMessage
+{
+    public uint Generation;
+    public ulong NonceHigh;
+    public ulong NonceLow;
+    public ulong HostId;
+    public ulong ActorId;
+    public SerializableRun Run = null!;
+
+    public bool ShouldBroadcast => false;
+    public NetTransferMode Mode => NetTransferMode.Reliable;
+    public LogLevel LogLevel => LogLevel.Debug;
+    public bool ShouldBuffer => false;
+
+    public void Serialize(PacketWriter writer)
+    {
+        writer.WriteUInt(Generation, 32);
+        writer.WriteULong(NonceHigh, 64);
+        writer.WriteULong(NonceLow, 64);
+        writer.WriteULong(HostId, 64);
+        writer.WriteULong(ActorId, 64);
+        writer.Write(Run);
+    }
+
+    public void Deserialize(PacketReader reader)
+    {
+        Generation = reader.ReadUInt(32);
+        NonceHigh = reader.ReadULong(64);
+        NonceLow = reader.ReadULong(64);
+        HostId = reader.ReadULong(64);
+        ActorId = reader.ReadULong(64);
+        Run = reader.Read<SerializableRun>();
+    }
+}
+
 internal static class MultiplayerRestartCoordinator
 {
-    internal enum Phase { Idle, Preparing, AllAcknowledged, ReopeningLobby, WaitingForPlayers, Starting }
+    internal enum Phase
+    {
+        Idle,
+        Preparing,
+        DirectPreparing,
+        AllAcknowledged,
+        DirectLoading,
+        ReopeningLobby,
+        WaitingForPlayers,
+        Starting,
+    }
+
+    private enum RestartDecision
+    {
+        Undecided,
+        Direct,
+        Lobby,
+    }
 
     private enum AutoJoinOutcome
     {
@@ -110,18 +172,24 @@ internal static class MultiplayerRestartCoordinator
         internal bool TimeoutOverlaySuppressedLogged { get; set; }
         internal AutoJoinOutcome Outcome { get; set; }
         internal string? OutcomeDetail { get; set; }
+        internal RestartDecision Decision { get; set; }
+        internal SerializableRun? DirectSave { get; set; }
+        internal RunState? DirectState { get; set; }
     }
 
     private const string CompatibleModPrefix = "RetryTheSpire-";
     private const double PrepareTimeoutSeconds = 3.0;
     private const double ResendSeconds = 0.15;
+    private const double DirectResendSeconds = 0.5;
     private const double AutoJoinTimeoutSeconds = 15.0;
 
     private static readonly HashSet<ulong> CapablePeers = [];
+    private static readonly HashSet<ulong> DirectCapablePeers = [];
     private static readonly HashSet<ulong> EverCapablePeers = [];
     private static readonly HashSet<ulong> PendingProbe = [];
     private static readonly HashSet<ulong> PendingPrepare = [];
     private static readonly HashSet<ulong> PreparedPeers = [];
+    private static readonly HashSet<ulong> PendingDirectPrepare = [];
     private static readonly Dictionary<ulong, int> SendRounds = [];
     private static readonly object RegistrationLock = new();
 
@@ -139,6 +207,8 @@ internal static class MultiplayerRestartCoordinator
     private static string? _oldLobbyIdentifier;
     private static bool _hostAutoStartArmed;
     private static bool _hostReadySent;
+    private static bool _directCandidate;
+    private static SerializableRun? _directSave;
     private static AutoRejoinSession? _clientSession;
 
     internal static Phase CurrentPhase { get; private set; } = Phase.Idle;
@@ -172,19 +242,26 @@ internal static class MultiplayerRestartCoordinator
                     ?? throw new InvalidOperationException("native message subtype table is unavailable");
                 var nativeSet = native.ToHashSet();
                 var otherModMessages = types
-                    .Where(type => !nativeSet.Contains(type) && type != typeof(RestartControlMessage))
+                    .Where(type => !nativeSet.Contains(type)
+                        && type != typeof(RestartControlMessage)
+                        && type != typeof(DirectRestartPayloadMessage))
                     .OrderBy(type => type.FullName, StringComparer.Ordinal)
                     .ToArray();
                 types.Clear();
                 types.AddRange(native);
                 types.AddRange(otherModMessages);
+                // This must remain the first Retry-owned message. v0.4.3 peers
+                // already use this exact id for their legacy restart channel.
                 types.Add(typeof(RestartControlMessage));
+                types.Add(typeof(DirectRestartPayloadMessage));
                 ids.Clear();
                 for (int i = 0; i < types.Count; i++) ids[types[i]] = i;
                 _messageTypeRegistered = true;
                 GD.Print(
                     $"{RetryMod.LogPrefix}restart transport registered " +
-                    $"typeId={ids[typeof(RestartControlMessage)]} nativeCount={native.Count} totalCount={types.Count}");
+                    $"controlTypeId={ids[typeof(RestartControlMessage)]} " +
+                    $"directTypeId={ids[typeof(DirectRestartPayloadMessage)]} " +
+                    $"nativeCount={native.Count} totalCount={types.Count}");
             }
             catch (Exception ex)
             {
@@ -201,14 +278,18 @@ internal static class MultiplayerRestartCoordinator
         if (service.Type == NetGameType.Host)
         {
             CapablePeers.Clear();
+            DirectCapablePeers.Clear();
             EverCapablePeers.Clear();
         }
         if (_registeredService != null)
         {
             try { _registeredService.UnregisterMessageHandler<RestartControlMessage>(OnControlMessage); }
             catch { }
+            try { _registeredService.UnregisterMessageHandler<DirectRestartPayloadMessage>(OnDirectPayloadMessage); }
+            catch { }
         }
         service.RegisterMessageHandler<RestartControlMessage>(OnControlMessage);
+        service.RegisterMessageHandler<DirectRestartPayloadMessage>(OnDirectPayloadMessage);
         _registeredService = service;
         GD.Print($"{RetryMod.LogPrefix}restart transport bound local={service.NetId} type={service.Type}");
     }
@@ -235,7 +316,11 @@ internal static class MultiplayerRestartCoordinator
             try
             {
                 Send(net, hostId, RestartControlKind.Capability, 0, 0, 0, hostId);
-                GD.Print($"{RetryMod.LogPrefix}restart event=capability-send target={hostId} attempt={attempt}");
+                if (QuickRoomRestart.CanDirectReload)
+                    Send(net, hostId, RestartControlKind.DirectCapability, 0, 0, 0, hostId);
+                GD.Print(
+                    $"{RetryMod.LogPrefix}restart event=capability-send target={hostId} " +
+                    $"direct={QuickRoomRestart.CanDirectReload} attempt={attempt}");
             }
             catch (Exception ex)
             {
@@ -245,7 +330,7 @@ internal static class MultiplayerRestartCoordinator
         }
     }
 
-    internal static void BeginHostPreparation()
+    internal static void BeginHostPreparation(SerializableRun directSave)
     {
         if (_restartRequested || CurrentPhase != Phase.Idle) return;
         BindToCurrentService();
@@ -270,16 +355,22 @@ internal static class MultiplayerRestartCoordinator
         PendingProbe.Clear();
         PendingPrepare.Clear();
         PreparedPeers.Clear();
+        PendingDirectPrepare.Clear();
         SendRounds.Clear();
+        _directSave = directSave;
 
         var connected = manager.RunLobby.ConnectedPlayerIds.Where(id => id != net.NetId).ToHashSet();
         var compatible = CapablePeers.Where(connected.Contains).ToHashSet();
         var undeclared = connected.Where(id => !CapablePeers.Contains(id)).ToHashSet();
+        var directCapable = DirectCapablePeers.Where(connected.Contains).ToHashSet();
+        _directCandidate = QuickRoomRestart.CanDirectReload && connected.SetEquals(directCapable);
         var lostCapabilities = EverCapablePeers.Where(connected.Contains).Where(id => !CapablePeers.Contains(id)).ToArray();
         Log(
             "prepare-roster",
             $"connected=[{string.Join(',', connected)}] " +
             $"compatible=[{string.Join(',', compatible)}] " +
+            $"direct=[{string.Join(',', directCapable)}] " +
+            $"directCandidate={_directCandidate} " +
             $"undeclared=[{string.Join(',', undeclared)}]");
         if (lostCapabilities.Length > 0)
         {
@@ -310,18 +401,148 @@ internal static class MultiplayerRestartCoordinator
         bool probeOk = await RunAckPhase(net, PendingProbe, RestartControlKind.Probe, RestartControlKind.ProbeAck);
         if (!probeOk)
         {
+            if (_directCandidate)
+            {
+                // Capability packets proved these are new clients, but a
+                // missed probe must not prevent responsive peers from arming
+                // the existing auto-rejoin fallback.
+                PendingPrepare.Clear();
+                PendingPrepare.UnionWith(PreparedPeers);
+                await RunAckPhase(
+                    net, PendingPrepare,
+                    RestartControlKind.Prepare, RestartControlKind.PrepareAck);
+                await FallBackToLobbyAsync(net, "legacy-probe-timeout");
+                return;
+            }
             ShowTimeout("通信探测", PendingProbe);
             return;
         }
         bool prepareOk = await RunAckPhase(net, PendingPrepare, RestartControlKind.Prepare, RestartControlKind.PrepareAck);
         if (!prepareOk)
         {
+            if (_directCandidate)
+            {
+                await FallBackToLobbyAsync(net, "legacy-prepare-timeout");
+                return;
+            }
             ShowTimeout("重打通知", PendingPrepare);
+            return;
+        }
+
+        if (_directCandidate)
+        {
+            bool directOk = await PrepareDirectRestartAsync(net);
+            if (!directOk)
+            {
+                await FallBackToLobbyAsync(net, "direct-prepare-timeout");
+                return;
+            }
+
+            CurrentPhase = Phase.AllAcknowledged;
+            Log("direct-all-acknowledged", $"elapsedMs={ElapsedMs(_prepareStarted):F0}");
+            await CommitDirectRestartAsync(net);
             return;
         }
 
         CurrentPhase = Phase.AllAcknowledged;
         Log("all-acknowledged", $"elapsedMs={ElapsedMs(_prepareStarted):F0}");
+        await CommitAndContinueAsync(net);
+    }
+
+    private static async Task<bool> PrepareDirectRestartAsync(INetGameService net)
+    {
+        var save = _directSave;
+        if (save == null) return false;
+
+        CurrentPhase = Phase.DirectPreparing;
+        PendingDirectPrepare.Clear();
+        PendingDirectPrepare.UnionWith(DirectCapablePeers.Where(PreparedPeers.Contains));
+        long started = Stopwatch.GetTimestamp();
+        int round = 0;
+        while (PendingDirectPrepare.Count > 0
+            && Stopwatch.GetElapsedTime(started).TotalSeconds < PrepareTimeoutSeconds)
+        {
+            round++;
+            foreach (ulong peer in PendingDirectPrepare.ToArray())
+            {
+                try
+                {
+                    net.SendMessage(new DirectRestartPayloadMessage
+                    {
+                        Generation = _generation,
+                        NonceHigh = _nonceHigh,
+                        NonceLow = _nonceLow,
+                        HostId = _hostId,
+                        ActorId = net.NetId,
+                        Run = save,
+                    }, peer);
+                    Log("direct-save-send", $"target={peer} round={round}");
+                }
+                catch (Exception ex)
+                {
+                    GD.PrintErr(
+                        $"{RetryMod.LogPrefix}restart direct save target={peer} " +
+                        $"round={round}: {ex.Message}");
+                }
+            }
+            await DelayAsync(DirectResendSeconds);
+            if (CurrentPhase != Phase.DirectPreparing) return false;
+        }
+        Log(
+            "direct-prepare-phase",
+            $"remaining={string.Join(',', PendingDirectPrepare)} elapsedMs={ElapsedMs(started):F0}");
+        return PendingDirectPrepare.Count == 0;
+    }
+
+    private static async Task CommitDirectRestartAsync(INetGameService net)
+    {
+        for (int round = 1; round <= 2; round++)
+        {
+            foreach (ulong peer in PreparedPeers.Where(DirectCapablePeers.Contains).ToArray())
+            {
+                try
+                {
+                    Send(net, peer, RestartControlKind.DirectCommit,
+                        _generation, _nonceHigh, _nonceLow, _hostId);
+                    Log("direct-commit-send", $"target={peer} round={round}");
+                }
+                catch (Exception ex)
+                {
+                    GD.PrintErr(
+                        $"{RetryMod.LogPrefix}restart direct commit target={peer} " +
+                        $"round={round}: {ex.Message}");
+                }
+            }
+            if (round == 1 && PreparedPeers.Count > 0) await DelayAsync(0.05);
+        }
+
+        _restartRequested = false;
+        _directSave = null;
+        CurrentPhase = Phase.DirectLoading;
+        Log("direct-commit-complete", $"targets={PreparedPeers.Count}");
+        QuickRoomRestart.ContinueDirectAfterPreparation();
+    }
+
+    private static async Task FallBackToLobbyAsync(INetGameService net, string reason)
+    {
+        Log("direct-fallback", $"reason={reason}");
+        PendingProbe.Clear();
+        PendingPrepare.Clear();
+        PendingDirectPrepare.Clear();
+        _directCandidate = false;
+        foreach (ulong peer in PreparedPeers.Where(DirectCapablePeers.Contains).ToArray())
+        {
+            try
+            {
+                Send(net, peer, RestartControlKind.UseLobbyFallback,
+                    _generation, _nonceHigh, _nonceLow, _hostId);
+            }
+            catch (Exception ex)
+            {
+                GD.PrintErr($"{RetryMod.LogPrefix}restart direct fallback target={peer}: {ex.Message}");
+            }
+        }
+        CurrentPhase = Phase.AllAcknowledged;
         await CommitAndContinueAsync(net);
     }
 
@@ -404,6 +625,8 @@ internal static class MultiplayerRestartCoordinator
         }
 
         _restartRequested = false;
+        _directCandidate = false;
+        _directSave = null;
         Log("commit-complete", $"targets={PreparedPeers.Count} elapsedMs={ElapsedMs(_prepareStarted):F0}");
         QuickRoomRestart.ContinueAfterPreparation();
     }
@@ -417,15 +640,20 @@ internal static class MultiplayerRestartCoordinator
             if (message.ActorId != senderId || senderId == 0) return;
             Log("receive", $"kind={message.Kind} sender={senderId} actor={message.ActorId} generation={message.Generation}");
 
-            if (message.Kind == RestartControlKind.Capability && net.Type == NetGameType.Host)
+            if (message.Kind is RestartControlKind.Capability or RestartControlKind.DirectCapability
+                && net.Type == NetGameType.Host)
             {
                 if (message.HostId == net.NetId
                     && RunManager.Instance?.RunLobby?.ConnectedPlayerIds.Contains(senderId) == true)
                 {
                     bool first = CapablePeers.Add(senderId);
                     EverCapablePeers.Add(senderId);
+                    if (message.Kind == RestartControlKind.DirectCapability)
+                        DirectCapablePeers.Add(senderId);
                     if (first)
                         Log("capability-received", $"sender={senderId} connected=true");
+                    if (message.Kind == RestartControlKind.DirectCapability)
+                        Log("direct-capability-received", $"sender={senderId} connected=true");
                 }
                 return;
             }
@@ -438,6 +666,10 @@ internal static class MultiplayerRestartCoordinator
                     Log("ack", $"kind=ProbeAck sender={senderId} remaining={PendingProbe.Count}");
                 if (message.Kind == RestartControlKind.PrepareAck && PendingPrepare.Remove(senderId))
                     Log("ack", $"kind=PrepareAck sender={senderId} remaining={PendingPrepare.Count}");
+                if (message.Kind == RestartControlKind.DirectPrepareAck
+                    && CurrentPhase == Phase.DirectPreparing
+                    && PendingDirectPrepare.Remove(senderId))
+                    Log("ack", $"kind=DirectPrepareAck sender={senderId} remaining={PendingDirectPrepare.Count}");
                 return;
             }
 
@@ -474,12 +706,50 @@ internal static class MultiplayerRestartCoordinator
                     || session.NonceLow != message.NonceLow)
                     return;
 
+                if (session.Decision == RestartDecision.Direct) return;
+
                 if (!session.Committed)
                 {
+                    session.Decision = RestartDecision.Lobby;
+                    session.DirectSave = null;
+                    session.DirectState = null;
                     session.Committed = true;
                     LogSession(session, "client-commit", "begin-native-main-menu-transition");
                 }
                 BeginCommittedClientExit(session);
+                return;
+            }
+
+            if (message.Kind == RestartControlKind.UseLobbyFallback)
+            {
+                var session = _clientSession;
+                if (SessionMatches(session, senderId, message.Generation, message.NonceHigh, message.NonceLow)
+                    && !session!.Committed)
+                {
+                    session.Decision = RestartDecision.Lobby;
+                    session.DirectSave = null;
+                    session.DirectState = null;
+                    LogSession(session, "direct-fallback-received", "awaiting-lobby-commit");
+                }
+                return;
+            }
+
+            if (message.Kind == RestartControlKind.DirectCommit)
+            {
+                var session = _clientSession;
+                if (!SessionMatches(session, senderId, message.Generation, message.NonceHigh, message.NonceLow)
+                    || session!.Committed
+                    || session.Decision == RestartDecision.Lobby
+                    || session.DirectSave == null
+                    || session.DirectState == null)
+                    return;
+
+                session.Committed = true;
+                session.Decision = RestartDecision.Direct;
+                _autoRejoinArmed = false;
+                _suppressExpectedDisconnect = false;
+                LogSession(session, "direct-commit-received", "begin-in-place-load");
+                QuickRoomRestart.BeginDirectClientRestart(session.DirectSave, session.DirectState);
                 return;
             }
 
@@ -521,6 +791,58 @@ internal static class MultiplayerRestartCoordinator
             GD.PrintErr($"{RetryMod.LogPrefix}restart control receive: {ex.Message}");
         }
     }
+
+    private static void OnDirectPayloadMessage(DirectRestartPayloadMessage message, ulong senderId)
+    {
+        try
+        {
+            var net = RunManager.Instance?.NetService ?? _registeredService;
+            if (net is not NetClientGameService client
+                || senderId == 0
+                || senderId != client.HostNetId
+                || message.ActorId != senderId
+                || message.HostId != senderId)
+                return;
+
+            var session = _clientSession;
+            if (!SessionMatches(
+                    session, senderId, message.Generation, message.NonceHigh, message.NonceLow)
+                || session!.Committed
+                || session.Decision == RestartDecision.Lobby)
+                return;
+
+            if (session.DirectSave == null || session.DirectState == null)
+            {
+                ulong localId = net.NetId;
+                if (message.Run.Players.All(p => p.NetId != localId))
+                    throw new InvalidOperationException($"local player {localId} is absent from direct restart save");
+                session.DirectState = RunState.FromSerializable(message.Run);
+                session.DirectSave = message.Run;
+                LogSession(session, "direct-save-validated", $"local={localId}");
+            }
+
+            Send(net, senderId, RestartControlKind.DirectPrepareAck,
+                message.Generation, message.NonceHigh, message.NonceLow, senderId);
+        }
+        catch (Exception ex)
+        {
+            // Withhold the ACK. The host will automatically choose the native
+            // lobby path after the bounded direct-prepare timeout.
+            GD.PrintErr($"{RetryMod.LogPrefix}restart direct save rejected: {ex.Message}");
+        }
+    }
+
+    private static bool SessionMatches(
+        AutoRejoinSession? session,
+        ulong hostId,
+        uint generation,
+        ulong nonceHigh,
+        ulong nonceLow) =>
+        session != null
+        && session.HostId == hostId
+        && session.Generation == generation
+        && session.NonceHigh == nonceHigh
+        && session.NonceLow == nonceLow;
 
     internal static void OnClientDisconnected(ulong hostId, NetErrorInfo info)
     {
@@ -814,7 +1136,7 @@ internal static class MultiplayerRestartCoordinator
 
     internal static void ResetAfterRunLaunch()
     {
-        if (CurrentPhase == Phase.Starting) CurrentPhase = Phase.Idle;
+        if (CurrentPhase is Phase.Starting or Phase.DirectLoading) CurrentPhase = Phase.Idle;
         BindToCurrentService();
         var net = RunManager.Instance?.NetService;
         if (_hostSupportsProtocol
@@ -826,6 +1148,23 @@ internal static class MultiplayerRestartCoordinator
                 $"local={net.NetId} host={client.HostNetId} trigger=run-launch");
             _ = AnnounceCapabilityAsync(net, client.HostNetId);
         }
+    }
+
+    internal static void DirectLoadCompleted()
+    {
+        var session = _clientSession;
+        if (session?.Decision == RestartDecision.Direct)
+            ClearClientIdentity(session);
+        ResetAttempt();
+        Log("direct-load-complete", "session-cleared");
+    }
+
+    internal static void DirectLoadFailed()
+    {
+        var session = _clientSession;
+        if (session?.Decision == RestartDecision.Direct)
+            ClearClientIdentity(session);
+        ResetAttempt();
     }
 
     private static void Send(INetGameService net, ulong target, RestartControlKind kind,
@@ -872,7 +1211,14 @@ internal static class MultiplayerRestartCoordinator
     private static void ResetAttempt()
     {
         CurrentPhase = Phase.Idle;
+        PendingProbe.Clear();
+        PendingPrepare.Clear();
+        PendingDirectPrepare.Clear();
         PreparedPeers.Clear();
+        SendRounds.Clear();
+        _restartRequested = false;
+        _directCandidate = false;
+        _directSave = null;
         _nonceHigh = _nonceLow = 0;
         _hostId = 0;
         _prepareStarted = 0;

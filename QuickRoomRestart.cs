@@ -6,7 +6,10 @@ using Godot;
 using HarmonyLib;
 using MegaCrit.Sts2.Core.Combat;
 using MegaCrit.Sts2.Core.Context;
+using MegaCrit.Sts2.Core.Entities.Multiplayer;
+using MegaCrit.Sts2.Core.Multiplayer;
 using MegaCrit.Sts2.Core.Multiplayer.Game;
+using MegaCrit.Sts2.Core.Multiplayer.Game.Lobby;
 using MegaCrit.Sts2.Core.Nodes;
 using MegaCrit.Sts2.Core.Nodes.GodotExtensions;
 using MegaCrit.Sts2.Core.Nodes.Screens.MainMenu;
@@ -20,15 +23,27 @@ namespace Retry;
 
 /// <summary>
 /// Reloads the native room-entry save without first writing the current
-/// in-room state. Single-player loads directly; a multiplayer host returns
-/// to a native load-run lobby so unmodded clients can rejoin safely.
+/// in-room state. Single-player loads directly. Multiplayer loads in place
+/// when every connected peer supports it, otherwise it returns to the native
+/// load-run lobby so unmodded clients can rejoin safely.
 /// </summary>
 public static class QuickRoomRestart
 {
+    private static readonly FieldInfo? RunLobbyBackingField = typeof(RunManager).GetField(
+        "<RunLobby>k__BackingField", BindingFlags.Instance | BindingFlags.NonPublic);
+
     private static bool _restartInProgress;
     private static bool _liveRunCleaned;
+    [ThreadStatic]
+    private static int _networkPreservingCleanupDepth;
     private static SerializableRun? _preparedMultiplayerSave;
+    private static RunState? _preparedMultiplayerState;
     private static ulong _preparedMultiplayerHostId;
+
+    internal static bool CanDirectReload => RunLobbyBackingField != null;
+
+    internal static bool IsNetworkPreservingCleanup
+        => _networkPreservingCleanupDepth > 0;
 
     public static bool CanRestart(out bool multiplayer)
     {
@@ -67,6 +82,7 @@ public static class QuickRoomRestart
         var save = _preparedMultiplayerSave;
         ulong hostId = _preparedMultiplayerHostId;
         _preparedMultiplayerSave = null;
+        _preparedMultiplayerState = null;
         _preparedMultiplayerHostId = 0;
         if (save == null || hostId == 0)
         {
@@ -76,11 +92,33 @@ public static class QuickRoomRestart
         _ = RestartPreparedMultiplayerSafelyAsync(save, hostId);
     }
 
+    internal static void ContinueDirectAfterPreparation()
+    {
+        var save = _preparedMultiplayerSave;
+        var state = _preparedMultiplayerState;
+        _preparedMultiplayerSave = null;
+        _preparedMultiplayerState = null;
+        _preparedMultiplayerHostId = 0;
+        if (save == null || state == null)
+        {
+            ShowError("多人直载存档尚未准备完成，已取消本次重打。", resetGuard: true);
+            return;
+        }
+        _ = RestartPreparedDirectMultiplayerSafelyAsync(save, state);
+    }
+
+    internal static void BeginDirectClientRestart(SerializableRun save, RunState state)
+    {
+        _liveRunCleaned = false;
+        _ = RestartPreparedDirectMultiplayerSafelyAsync(save, state);
+    }
+
     internal static void CancelPreparation()
     {
         _restartInProgress = false;
         _liveRunCleaned = false;
         _preparedMultiplayerSave = null;
+        _preparedMultiplayerState = null;
         _preparedMultiplayerHostId = 0;
     }
 
@@ -112,10 +150,21 @@ public static class QuickRoomRestart
                 return;
             }
 
+            // Validate before negotiating. Once a direct commit is sent the
+            // old run will be torn down on every peer and cannot be recovered.
+            RunState directState;
+            try { directState = RunState.FromSerializable(read.SaveData); }
+            catch (Exception ex)
+            {
+                ShowError($"多人入口存档无法还原：{ex.Message}", resetGuard: true);
+                return;
+            }
+
             _preparedMultiplayerSave = read.SaveData;
+            _preparedMultiplayerState = directState;
             _preparedMultiplayerHostId = hostId;
             GD.Print($"{RetryMod.LogPrefix}quick restart: multiplayer room-entry save prepared before handshake");
-            MultiplayerRestartCoordinator.BeginHostPreparation();
+            MultiplayerRestartCoordinator.BeginHostPreparation(read.SaveData);
         }
         catch (Exception ex)
         {
@@ -253,6 +302,127 @@ public static class QuickRoomRestart
         }
     }
 
+    private static async Task RestartPreparedDirectMultiplayerSafelyAsync(
+        SerializableRun save,
+        RunState restored)
+    {
+        try
+        {
+            await RestartPreparedDirectMultiplayerAsync(save, restored);
+            MultiplayerRestartCoordinator.DirectLoadCompleted();
+            _restartInProgress = false;
+        }
+        catch (Exception ex)
+        {
+            GD.PrintErr($"{RetryMod.LogPrefix}quick restart direct load failed: {ex.Message}\n{ex.StackTrace}");
+            MultiplayerRestartCoordinator.DirectLoadFailed();
+            _restartInProgress = false;
+            _preparedMultiplayerSave = null;
+            _preparedMultiplayerState = null;
+            _preparedMultiplayerHostId = 0;
+
+            try
+            {
+                var manager = RunManager.Instance;
+                var net = manager?.NetService;
+                if (manager?.IsInProgress == true)
+                    manager.CleanUp(graceful: false);
+                if (net?.IsConnected == true)
+                    net.Disconnect(NetError.Quit, false);
+            }
+            catch { }
+
+            await EnsureMainMenuAfterFailureAsync();
+            OneButtonNotice.Show(
+                "重打",
+                "多人直载失败，当前联机连接已关闭。入口存档仍然保留，请从主菜单继续游戏。",
+                "知道了",
+                () => { });
+        }
+    }
+
+    private static async Task RestartPreparedDirectMultiplayerAsync(
+        SerializableRun save,
+        RunState restored)
+    {
+        var game = NGame.Instance ?? throw new InvalidOperationException("NGame.Instance is unavailable");
+        var manager = RunManager.Instance ?? throw new InvalidOperationException("RunManager.Instance is unavailable");
+        var net = manager.NetService ?? throw new InvalidOperationException("multiplayer service is unavailable");
+        var oldLobby = manager.RunLobby ?? throw new InvalidOperationException("active run lobby is unavailable");
+        if (!net.IsConnected)
+            throw new InvalidOperationException("multiplayer service disconnected before direct reload");
+        if (RunLobbyBackingField == null)
+            throw new MissingFieldException(typeof(RunManager).FullName, "<RunLobby>k__BackingField");
+
+        try { await game.Transition.FadeOut(0.2f); } catch { }
+
+        // Match LoadRunLobby.BeginRunLocally: hold gameplay packets until
+        // RunManager.Launch finishes installing the restored run.
+        net.SetBufferMessages(true);
+        RetryContext.ResetAll();
+        CombatManager.Instance.Reset(graceful: true);
+
+        // CleanUp always disconnects NetService, even when RunLobby is null.
+        // Hide the old lobby so CleanUp cannot dispose it, and suppress only
+        // the synchronous Disconnect call made by this specific cleanup. This
+        // retains the normal RunManager/subsystem cleanup without closing the
+        // Steam connection. Afterwards dispose only the old lobby handlers.
+        RunLobbyBackingField.SetValue(manager, null);
+        CleanUpRunPreservingNetwork(manager);
+        _liveRunCleaned = true;
+        oldLobby.Dispose();
+        if (!net.IsConnected)
+            throw new InvalidOperationException("multiplayer service disconnected during old-run cleanup");
+        LocalContext.NetId = net.NetId;
+
+        var loadLobby = new LoadRunLobby(net, DirectLoadRunLobbyListener.Instance, save);
+        bool loadLobbyCleaned = false;
+        try
+        {
+            await manager.SetUpSavedMultiplayer(restored, loadLobby);
+            if (!net.IsConnected)
+                throw new InvalidOperationException("multiplayer service disconnected during direct reload");
+            await game.LoadRun(restored, save.PreFinishedRoom);
+            loadLobby.CleanUp(false, NetError.Quit);
+            loadLobbyCleaned = true;
+        }
+        finally
+        {
+            // On success the input synchronizer now belongs to RunManager, so
+            // cleanup must only unregister temporary lobby handlers. On failure
+            // disconnect the half-installed multiplayer session.
+            if (!loadLobbyCleaned)
+            {
+                try { loadLobby.CleanUp(true, NetError.Quit); }
+                catch { }
+            }
+        }
+
+        try { await game.Transition.FadeIn(0.2f); } catch { }
+        GD.Print(
+            $"{RetryMod.LogPrefix}quick restart: multiplayer direct reload complete " +
+            $"lobby={SafeLobbyIdentifier(net) ?? "?"}");
+    }
+
+    private static void CleanUpRunPreservingNetwork(RunManager manager)
+    {
+        _networkPreservingCleanupDepth++;
+        try
+        {
+            manager.CleanUp(graceful: false);
+        }
+        finally
+        {
+            _networkPreservingCleanupDepth--;
+        }
+    }
+
+    private static string? SafeLobbyIdentifier(INetGameService net)
+    {
+        try { return net.GetRawLobbyIdentifier(); }
+        catch { return null; }
+    }
+
     private static async Task EnsureMainMenuAfterFailureAsync()
     {
         try
@@ -275,10 +445,54 @@ public static class QuickRoomRestart
             if (!_liveRunCleaned) MultiplayerRestartCoordinator.AbortBeforeDisconnect();
             _restartInProgress = false;
             _preparedMultiplayerSave = null;
+            _preparedMultiplayerState = null;
             _preparedMultiplayerHostId = 0;
         }
         OneButtonNotice.Show("重打", body, "知道了", () => { });
     }
+}
+
+[HarmonyPatch(typeof(NetClientGameService), nameof(NetClientGameService.Disconnect),
+    new[] { typeof(NetError), typeof(bool) })]
+internal static class DirectRestartClientDisconnectPatch
+{
+    private static bool Prefix(NetError reason, bool now)
+        => AllowOrSuppressDisconnect("client", reason, now);
+
+    private static bool AllowOrSuppressDisconnect(string side, NetError reason, bool now)
+    {
+        if (!QuickRoomRestart.IsNetworkPreservingCleanup) return true;
+        GD.Print(
+            $"{RetryMod.LogPrefix}quick restart: suppressed {side} disconnect " +
+            $"during direct cleanup reason={reason} now={now}");
+        return false;
+    }
+}
+
+[HarmonyPatch(typeof(NetHostGameService), nameof(NetHostGameService.Disconnect),
+    new[] { typeof(NetError), typeof(bool) })]
+internal static class DirectRestartHostDisconnectPatch
+{
+    private static bool Prefix(NetError reason, bool now)
+    {
+        if (!QuickRoomRestart.IsNetworkPreservingCleanup) return true;
+        GD.Print(
+            $"{RetryMod.LogPrefix}quick restart: suppressed host disconnect " +
+            $"during direct cleanup reason={reason} now={now}");
+        return false;
+    }
+}
+
+internal sealed class DirectLoadRunLobbyListener : ILoadRunLobbyListener
+{
+    internal static DirectLoadRunLobbyListener Instance { get; } = new();
+
+    public void BeginRun() { }
+    public void LocalPlayerDisconnected(NetErrorInfo info) { }
+    public void PlayerConnected(ulong playerId) { }
+    public void PlayerReadyChanged(ulong playerId) { }
+    public void RemotePlayerDisconnected(ulong playerId) { }
+    public Task<bool> ShouldAllowRunToBegin() => Task.FromResult(true);
 }
 
 [HarmonyPatch(typeof(NPauseMenu), "_Ready")]

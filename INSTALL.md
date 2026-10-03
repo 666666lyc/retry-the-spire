@@ -6,8 +6,9 @@
    `mods/RetryTheSpire/RetryTheSpire.dll`.
 4. Launch the game and enable **Retry the Spire** from the Mods screen.
 
-Only the multiplayer host needs Retry the Spire for manual lobby-based retry.
-Players using Retry the Spire v0.4.3 or newer can automatically rejoin and
-ready during an in-run multiplayer restart. Unmodded players can still rejoin
-the replacement lobby manually. All players still need matching versions of
-any gameplay/content mods used by the run.
+When every connected player uses Retry the Spire v0.4.4 or newer, an in-run
+multiplayer restart reloads directly without leaving the current lobby. With
+an unmodded or older client, the host uses the native replacement lobby;
+players using v0.4.3 or newer automatically rejoin and ready, while unmodded
+players can rejoin manually. All players still need matching versions of any
+gameplay/content mods used by the run.

@@ -2,8 +2,8 @@
   "id": "RetryTheSpire",
   "name": "Retry the Spire",
   "author": "666666lyc (fork maintainer); original by Austin/sts2mods",
-  "description": "Resume past runs from visited nodes and quickly restart the current room. Compatible multiplayer clients can automatically rejoin and ready in the rebuilt native lobby.",
-  "version": "0.4.3",
+  "description": "Resume past runs from visited nodes and quickly restart the current room. Updated multiplayer peers reload directly; mixed clients fall back to the native lobby.",
+  "version": "0.4.4",
   "has_pck": false,
   "has_dll": true,
   "affects_gameplay": false
