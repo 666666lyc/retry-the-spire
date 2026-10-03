@@ -4,7 +4,14 @@ obj/
 out/
 dist/
 .dotnet/
+.dotnet-cli-home/
 .dotnet-home/
+.publish/
+
+# Local release and Git-recovery artifacts
+RetryTheSpire-v*.zip
+.git-index-*
+.git-objects-*/
 
 # Editor
 *.user
