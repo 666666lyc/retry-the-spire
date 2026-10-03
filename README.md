@@ -25,21 +25,25 @@ progress restored.
   game's standard load-run lobby.
 - Restores every original multiplayer participant under their recorded Steam
   ID. Only those players can join the restored lobby.
-- Requires Retry the Spire only on the host. Clients receive the native save
-  through the game's normal `LoadRunLobby` flow.
+- Restoring a multiplayer history entry requires Retry the Spire only on the
+  host. Clients receive the native save through the game's normal
+  `LoadRunLobby` flow.
 - Keeps multiplayer history lobbies in `GameMode.Standard`, without custom
   modifiers, so the game applies its normal multiplayer ascension rules.
 - Keeps the game's independent single-player and multiplayer save slots
   separate.
 - Adds **重打** to the in-run pause menu. Single-player reloads the native
   room-entry save immediately. When every connected multiplayer peer runs
-  v0.4.4 or newer, all peers reload that save directly while keeping the
+  v0.5.0 or newer, all peers reload that save directly while keeping the
   current network connection and never opening the load-run lobby.
-- If an in-run multiplayer restart includes an unmodded or older peer, it uses
-  the native replacement lobby. An all-v0.4.4 direct attempt also falls back
-  there automatically if a peer does not respond. Players running v0.4.3 or
-  newer automatically find that lobby and ready up; unmodded players can
+- If an in-run multiplayer restart includes an unmodded peer, it uses the
+  native replacement lobby. An all-v0.5.0 direct attempt also falls back there
+  automatically if a peer does not respond. Updated peers automatically find
+  that lobby and ready up; unmodded players need no extra dependency and can
   rejoin manually.
+- Only players who want the automatic in-place reload need to install Retry
+  the Spire. Unmodded players can join normally and use the native replacement
+  lobby path after a restart.
 
 ## Limitations
 
@@ -48,11 +52,13 @@ progress restored.
 - Gameplay/content mods that register models must still match on every
   multiplayer client. Cosmetic or non-gameplay mods may differ.
 - The original Retry and Retry the Spire are mutually exclusive at runtime.
+- Retry the Spire v0.4.x uses an incompatible multiplayer protocol. Upgrade it
+  to v0.5.0 or disable it before joining a v0.5.0 room.
 - The game disables achievements while mods are loaded.
 
 ## Installation
 
-Download `RetryTheSpire-v0.4.4.zip` from the GitHub Releases page and extract
+Download `RetryTheSpire-v0.5.0.zip` from the GitHub Releases page and extract
 it into the game's `mods` directory. The final layout must be:
 
 ```text
@@ -105,22 +111,24 @@ Retry the Spire 可以从已到访的地图节点重新开始《杀戮尖塔 2�
 - 单人模式重打兼容上游项目的自定义对局流程。
 - 将多人历史对局重建为游戏原生的 `SerializableRun`，并打开游戏的标准读取对局大厅。
 - 使用记录中的 Steam ID 恢复原多人对局的所有参与者；只有这些玩家能够加入恢复后的大厅。
-- 仅多人模式房主需要安装 Retry the Spire。客户端通过游戏正常的 `LoadRunLobby` 流程接收原生存档。
+- 恢复多人历史对局时，仅房主需要安装 Retry the Spire。客户端通过游戏正常的 `LoadRunLobby` 流程接收原生存档。
 - 多人历史对局大厅保持为 `GameMode.Standard`，不附加自定义修改项，因此游戏会应用正常的多人进阶规则。
 - 保持游戏的单人和多人存档槽相互独立。
-- 在对局中的暂停菜单加入 **重打**。单人模式会立即读取进入当前房间时的原生存档；多人模式下，如果所有在线玩家均使用 v0.4.4 或更高版本，则所有玩家会保留当前网络连接并直接重载，不进入读取对局大厅。
-- 多人重打中如果存在未安装模组或版本较旧的玩家，则使用原生替换大厅；全员 v0.4.4 的直载尝试中若有玩家未响应，也会自动降级到该大厅。使用 v0.4.3 或更高版本的玩家会自动找到新大厅并准备，未安装模组的玩家仍可手动重新加入。
+- 在对局中的暂停菜单加入 **重打**。单人模式会立即读取进入当前房间时的原生存档；多人模式下，如果所有在线玩家均使用 v0.5.0 或更高版本，则所有玩家会保留当前网络连接并直接重载，不进入读取对局大厅。
+- 多人重打中如果存在未安装模组的玩家，则使用原生替换大厅；全员 v0.5.0 的直载尝试中若有玩家未响应，也会自动降级到该大厅。新版玩家会自动找到新大厅并准备；未安装模组的玩家不需要任何额外依赖，可以手动重新加入。
+- 只有需要自动原房间直载的玩家才需要安装 Retry the Spire；未安装玩家仍可正常加入，并在重打后通过原生替换大厅手动重进。
 
 ### 已知限制
 
 - 安装此模组之前生成的历史对局可能缺少每层的随机数快照，因此战斗内部的随机结果可能与原对局不同。
 - 注册游戏模型的玩法或内容模组必须在所有多人客户端上保持一致；外观类或不影响玩法的模组可以不同。
 - 原版 Retry 与 Retry the Spire 无法同时运行。
+- Retry the Spire v0.4.x 使用不兼容的多人通信协议；加入 v0.5.0 房间前必须升级到 v0.5.0 或禁用旧版。
 - 游戏会在加载模组时禁用成就。
 
 ### 安装
 
-从 GitHub Releases 页面下载 `RetryTheSpire-v0.4.4.zip`，并解压到游戏的 `mods` 目录中。最终目录结构必须如下：
+从 GitHub Releases 页面下载 `RetryTheSpire-v0.5.0.zip`，并解压到游戏的 `mods` 目录中。最终目录结构必须如下：
 
 ```text
 mods/
