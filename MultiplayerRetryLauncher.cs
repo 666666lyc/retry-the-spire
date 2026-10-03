@@ -7,6 +7,7 @@ using System.Collections.Generic;
 using System.Linq;
 using System.Reflection;
 using Godot;
+using MegaCrit.Sts2.Core.Combat;
 using MegaCrit.Sts2.Core.Context;
 using MegaCrit.Sts2.Core.Entities.Players;
 using MegaCrit.Sts2.Core.Map;
@@ -323,6 +324,8 @@ internal static class MultiplayerRetryLauncher
         finally
         {
             RetryContext.ResetAll();
+            try { CombatManager.Instance.Reset(graceful: true); }
+            catch (Exception ex) { GD.PrintErr($"{RetryMod.LogPrefix}multiplayer synthesis combat cleanup: {ex.Message}"); }
             try { RunManager.Instance.CleanUp(graceful: false); }
             catch (Exception ex) { GD.PrintErr($"{RetryMod.LogPrefix}multiplayer synthesis cleanup: {ex.Message}"); }
             NActMapBrowser.NetServiceNetIdOverride = null;

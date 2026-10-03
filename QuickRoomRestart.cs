@@ -4,6 +4,7 @@ using System.Reflection;
 using System.Threading.Tasks;
 using Godot;
 using HarmonyLib;
+using MegaCrit.Sts2.Core.Combat;
 using MegaCrit.Sts2.Core.Context;
 using MegaCrit.Sts2.Core.Multiplayer.Game;
 using MegaCrit.Sts2.Core.Nodes;
@@ -205,9 +206,13 @@ public static class QuickRoomRestart
         try { await game.Transition.FadeOut(0.2f); } catch { }
 
         RetryContext.ResetAll();
-        // A graceful Steam host shutdown delays closing its listen socket.
-        // Starting the replacement host during that delay lets the old cleanup
-        // close the new listener, leaving a visible but unreachable lobby.
+        // Split combat and network cleanup deliberately. A graceful Steam host
+        // shutdown delays closing its listen socket; starting the replacement
+        // host during that delay lets the old cleanup close the new listener.
+        // RunManager.CleanUp(false), however, skips CombatManager.Reset and
+        // leaves the old combat state installed, so a combat-room reload can
+        // fail in SetUpCombat and tear down the newly created room.
+        CombatManager.Instance.Reset(graceful: true);
         RunManager.Instance.CleanUp(graceful: false);
         _liveRunCleaned = true;
         LocalContext.NetId = hostId;
