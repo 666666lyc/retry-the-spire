@@ -76,14 +76,6 @@ Room snapshots are stored beside the active profile saves, allowing Steam Cloud 
 [*]v0.4.x uses an incompatible multiplayer protocol. Upgrade to v0.5.0 or newer, or disable the old version before joining a current room.
 [/list]
 
-[h1]Known limitations[/h1]
-
-[list]
-[*]History entries created before v0.5.1 use best-effort reconstruction when no room snapshot is available. Some combat-only counters and RNG results may differ.
-[*]The original Retry and Retry the Spire cannot run together.
-[*]The game disables achievements while mods are loaded.
-[/list]
-
 [h1]Source and feedback[/h1]
 
 Source code, full documentation, and issue tracker:
