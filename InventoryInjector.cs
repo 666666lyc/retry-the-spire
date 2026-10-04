@@ -34,6 +34,20 @@ public static class InventoryInjector
         var player = runState.Players.FirstOrDefault(pp => pp.NetId == snapshot.NetId)
                      ?? runState.Players[0];
 
+        if (snapshot.ExactState != null)
+        {
+            try
+            {
+                player.SyncWithSerializedPlayer(snapshot.ExactState);
+                GD.Print($"{RetryMod.LogPrefix}inject exact: netId={player.NetId} relics={player.Relics.Count} deck={player.Deck.Cards.Count} potions={player.Potions.Count()} slots={player.MaxPotionCount}");
+                return;
+            }
+            catch (Exception ex)
+            {
+                GD.PrintErr($"{RetryMod.LogPrefix}inject exact failed, falling back to reconstructed fields: {ex.Message}");
+            }
+        }
+
         // HP / Max HP / Gold — set via the internal setters so health
         // bar listeners pick up the change.
         try
@@ -71,12 +85,22 @@ public static class InventoryInjector
             catch (Exception ex) { GD.PrintErr($"{RetryMod.LogPrefix}add relic {sr.Id}: {ex.Message}"); }
         }
 
-        // ----- Potions: discard starting, add historical -----
+        // ----- Potions: discard starting, restore capacity, add historical -----
+        // AddRelicInternal intentionally does not replay AfterObtained, so
+        // pickup-only capacity effects (Potion Belt, Phial Holster,
+        // Alchemical Coffer) must be restored explicitly.
         foreach (var potion in player.Potions.ToList())
         {
             try { player.DiscardPotionInternal(potion, silent: silent); }
             catch (Exception ex) { GD.PrintErr($"{RetryMod.LogPrefix}discard potion: {ex.Message}"); }
         }
+        try
+        {
+            int slotDelta = snapshot.MaxPotionSlotCount - player.MaxPotionCount;
+            if (slotDelta > 0) player.AddToMaxPotionCount(slotDelta);
+            else if (slotDelta < 0) player.SubtractFromMaxPotionCount(-slotDelta);
+        }
+        catch (Exception ex) { GD.PrintErr($"{RetryMod.LogPrefix}set potion slots: {ex.Message}"); }
         foreach (var sp in snapshot.Potions)
         {
             if (sp.Id == null) continue;
@@ -115,6 +139,6 @@ public static class InventoryInjector
             }
             catch (Exception ex) { GD.PrintErr($"{RetryMod.LogPrefix}add card {sc.Id}: {ex.Message}"); }
         }
-        GD.Print($"{RetryMod.LogPrefix}inject summary: relics={player.Relics.Count} deck={player.Deck.Cards.Count} potions={player.Potions.Count()}");
+        GD.Print($"{RetryMod.LogPrefix}inject summary: state={snapshot.Fidelity} relics={player.Relics.Count} deck={player.Deck.Cards.Count} potions={player.Potions.Count()} slots={player.MaxPotionCount}");
     }
 }

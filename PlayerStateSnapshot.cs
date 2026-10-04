@@ -14,8 +14,21 @@ using MegaCrit.Sts2.Core.Saves.Runs;
 
 namespace Retry;
 
+public enum PlayerStateFidelity
+{
+    Reconstructed,
+    Exact,
+}
+
 public sealed class PlayerStateSnapshot
 {
+    // A room-entry sidecar stores the game's complete native player shape.
+    // When present, InventoryInjector uses the game's own synchronization
+    // path and the reconstructed fields below remain available for previews
+    // and diagnostics.
+    public SerializablePlayer? ExactState;
+    public PlayerStateFidelity Fidelity = PlayerStateFidelity.Reconstructed;
+
     // Identity / character
     public ulong NetId;
     public ModelId? CharacterId;
@@ -32,10 +45,6 @@ public sealed class PlayerStateSnapshot
     public List<SerializableCard> Deck = new();
     public List<SerializableRelic> Relics = new();
     public List<SerializablePotion> Potions = new();
-
-    // Tracking — needed so events don't repeat, quests don't reset, etc.
-    public List<ModelId> EventsSeen = new();
-    public List<ModelId> CompletedQuests = new();
 }
 
 public sealed class RetryTarget

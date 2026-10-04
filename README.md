@@ -20,6 +20,8 @@ progress restored.
 - Previews every visited act and node using the original map path.
 - Restores cards, relics, potions, health, gold, event history, room queues,
   and available RNG snapshots.
+- Stores versioned room-entry player, map, and RNG snapshots beside the
+  current profile saves so Steam Cloud can carry exact retries across devices.
 - Keeps single-player retries compatible with the upstream custom-run flow.
 - Rebuilds multiplayer history as a native `SerializableRun` and opens the
   game's standard load-run lobby.
@@ -47,8 +49,8 @@ progress restored.
 
 ## Limitations
 
-- Historical runs created before installing the mod may lack per-floor RNG
-  snapshots, so combat-internal RNG can diverge.
+- Historical runs created before v0.5.1 use best-effort reconstruction when a
+  room snapshot is unavailable; combat-only counters and RNG can diverge.
 - Gameplay/content mods that register models must still match on every
   multiplayer client. Cosmetic or non-gameplay mods may differ.
 - The original Retry and Retry the Spire are mutually exclusive at runtime.
@@ -58,7 +60,7 @@ progress restored.
 
 ## Installation
 
-Download `RetryTheSpire-v0.5.0.zip` from the GitHub Releases page and extract
+Download `RetryTheSpire-v0.5.2.zip` from the GitHub Releases page and extract
 it into the game's `mods` directory. The final layout must be:
 
 ```text
@@ -108,6 +110,7 @@ Retry the Spire 可以从已到访的地图节点重新开始《杀戮尖塔 2�
 - 在对局历史和游戏结束界面中加入 **View Acts（查看章节）** 按钮。
 - 按原始地图路线预览所有已到访的章节和节点。
 - 恢复卡牌、遗物、药水、生命值、金币、事件历史、房间队列以及可用的随机数快照。
+- 将版本化的逐房间玩家状态、地图坐标和随机数快照保存在当前档案的存档目录中，可由 Steam 云在不同设备间同步。
 - 单人模式重打兼容上游项目的自定义对局流程。
 - 将多人历史对局重建为游戏原生的 `SerializableRun`，并打开游戏的标准读取对局大厅。
 - 使用记录中的 Steam ID 恢复原多人对局的所有参与者；只有这些玩家能够加入恢复后的大厅。
@@ -120,7 +123,7 @@ Retry the Spire 可以从已到访的地图节点重新开始《杀戮尖塔 2�
 
 ### 已知限制
 
-- 安装此模组之前生成的历史对局可能缺少每层的随机数快照，因此战斗内部的随机结果可能与原对局不同。
+- v0.5.1 之前生成的历史对局若缺少房间快照，会使用尽力增量重建；无法证明的战斗内计数及随机结果可能与原对局不同。
 - 注册游戏模型的玩法或内容模组必须在所有多人客户端上保持一致；外观类或不影响玩法的模组可以不同。
 - 原版 Retry 与 Retry the Spire 无法同时运行。
 - Retry the Spire v0.4.x 使用不兼容的多人通信协议；加入 v0.5.0 房间前必须升级到 v0.5.0 或禁用旧版。
@@ -128,7 +131,7 @@ Retry the Spire 可以从已到访的地图节点重新开始《杀戮尖塔 2�
 
 ### 安装
 
-从 GitHub Releases 页面下载 `RetryTheSpire-v0.5.0.zip`，并解压到游戏的 `mods` 目录中。最终目录结构必须如下：
+从 GitHub Releases 页面下载 `RetryTheSpire-v0.5.2.zip`，并解压到游戏的 `mods` 目录中。最终目录结构必须如下：
 
 ```text
 mods/

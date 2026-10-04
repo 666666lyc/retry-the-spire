@@ -14,7 +14,6 @@
 //   • PotionChoices (wasPicked)        → picked potion adds
 //   • BoughtPotions                   → shop-bought potions
 //   • PotionDiscarded / PotionUsed    → potion removals
-//   • CompletedQuests                 → quest carry-over
 //
 // Final HP / MaxHp / Gold are read from the entry just before the
 // target rather than computed from deltas — the recorded numbers
@@ -22,10 +21,15 @@
 using System;
 using System.Collections.Generic;
 using System.Linq;
+using System.Reflection;
+using Godot;
+using MegaCrit.Sts2.Core.Entities.Ascension;
+using MegaCrit.Sts2.Core.Entities.Players;
 using MegaCrit.Sts2.Core.Models;
 using MegaCrit.Sts2.Core.Models.Relics;
 using MegaCrit.Sts2.Core.Runs;
 using MegaCrit.Sts2.Core.Runs.History;
+using MegaCrit.Sts2.Core.Saves;
 using MegaCrit.Sts2.Core.Saves.Runs;
 
 namespace Retry;
@@ -38,11 +42,25 @@ public static class StateReconstructor
         int targetFloorIndex,
         RunHistoryPlayer player)
     {
+        var exact = RngSnapshotStore.TryGetPlayerSnapshot(
+            history.StartTime, history.Seed, targetActIndex, targetFloorIndex, player.Id);
+        if (exact != null && exact.CharacterId != null && exact.CharacterId.Equals(player.Character))
+        {
+            var exactSnapshot = FromExactState(exact);
+            GD.Print($"{RetryMod.LogPrefix}player state exact: netId={player.Id} act={targetActIndex} floor={targetFloorIndex} slots={exactSnapshot.MaxPotionSlotCount}");
+            return exactSnapshot;
+        }
+        GD.Print($"{RetryMod.LogPrefix}player snapshot unavailable: netId={player.Id} act={targetActIndex} floor={targetFloorIndex}; falling back to history reconstruction");
+
+        int basePotionSlots = Player.initialMaxPotionSlotCount;
+        var ascension = new AscensionManager(history.Ascension);
+        bool tightBelt = ascension.HasLevel(AscensionLevel.TightBelt);
+        if (tightBelt) basePotionSlots--;
         var snapshot = new PlayerStateSnapshot
         {
             NetId = player.Id,
             CharacterId = player.Character,
-            MaxPotionSlotCount = player.MaxPotionSlotCount,
+            MaxPotionSlotCount = basePotionSlots,
         };
 
         SeedFromCharacter(snapshot, player.Character);
@@ -90,6 +108,8 @@ public static class StateReconstructor
         }
 
         RestoreSilkenTressState(snapshot, player, silkenTressUsed);
+        BackfillStableRelicProperties(
+            snapshot, player, history, targetActIndex, targetFloorIndex);
 
         // Override scalar fields from the last applied entry so HP /
         // gold are exactly what the recorded run reports rather than
@@ -101,8 +121,26 @@ public static class StateReconstructor
             snapshot.Gold = lastApplied.CurrentGold;
         }
 
+        GD.Print($"{RetryMod.LogPrefix}player state reconstructed: netId={player.Id} ascension={history.Ascension} tightBelt={tightBelt} slots={snapshot.MaxPotionSlotCount} deck={snapshot.Deck.Count} relics={snapshot.Relics.Count}");
+        LogApproximateSavedProperties(snapshot);
+
         return snapshot;
     }
+
+    private static PlayerStateSnapshot FromExactState(SerializablePlayer exact) => new()
+    {
+        ExactState = exact,
+        Fidelity = PlayerStateFidelity.Exact,
+        NetId = exact.NetId,
+        CharacterId = exact.CharacterId,
+        CurrentHp = exact.CurrentHp,
+        MaxHp = exact.MaxHp,
+        Gold = exact.Gold,
+        MaxPotionSlotCount = exact.MaxPotionSlotCount,
+        Deck = new List<SerializableCard>(exact.Deck),
+        Relics = new List<SerializableRelic>(exact.Relics),
+        Potions = new List<SerializablePotion>(exact.Potions),
+    };
 
     private static void SeedFromCharacter(PlayerStateSnapshot s, ModelId characterId)
     {
@@ -128,6 +166,7 @@ public static class StateReconstructor
         }
         foreach (var relic in character.StartingRelics)
         {
+            s.MaxPotionSlotCount += PotionSlotBonus(relic.Id);
             s.Relics.Add(new SerializableRelic
             {
                 Id = relic.Id,
@@ -174,19 +213,31 @@ public static class StateReconstructor
             var card = FindCardToDowngrade(s.Deck, id);
             if (card != null) card.CurrentUpgradeLevel = Math.Max(0, card.CurrentUpgradeLevel - 1);
         }
+        // A room can enchant several identical cards (Goopy commonly enchants
+        // every basic Defend). Each history record must consume a distinct
+        // deck instance; repeatedly selecting the first id match collapses the
+        // whole batch onto one card.
+        var enchantedThisBatch = new HashSet<int>();
         foreach (var ench in e.CardsEnchanted)
         {
             if (ench.Card.Id == null) continue;
-            var card = FindFirstById(s.Deck, ench.Card.Id);
-            if (card == null) continue;
+            int index = FindBestMatching(s.Deck, ench.Card, enchantedThisBatch, preferUnenchanted: true);
+            if (index < 0) continue;
+            enchantedThisBatch.Add(index);
+            var card = s.Deck[index];
             // Prefer the embedded post-enchant SerializableEnchantment
             // from ench.Card.Enchantment — it carries Amount (and any
             // other future fields) which the bare `ench.Enchantment`
             // id doesn't. Constructing a fresh SerializableEnchantment
             // with only Id loses the block/damage value, which is why
             // retried enchanted cards showed "Gain 0 Block" etc.
-            card.Enchantment = ench.Card.Enchantment
+            card.Enchantment = CloneEnchantment(ench.Card.Enchantment)
                 ?? new SerializableEnchantment { Id = ench.Enchantment };
+            GD.Print(
+                $"{RetryMod.LogPrefix}enchant instance match: " +
+                $"card={card.Id} index={index} upgrade={card.CurrentUpgradeLevel} " +
+                $"floorAdded={card.FloorAddedToDeck} enchant={card.Enchantment.Id} " +
+                $"amount={card.Enchantment.Amount}");
         }
         foreach (var trans in e.CardsTransformed)
         {
@@ -206,12 +257,26 @@ public static class StateReconstructor
         foreach (var pick in e.RelicChoices)
         {
             if (!pick.wasPicked) continue;
+            AdjustPotionSlotCount(s, PotionSlotBonus(pick.choice), $"gain {pick.choice}");
             s.Relics.Add(new SerializableRelic { Id = pick.choice, FloorAddedToDeck = floorNum });
         }
         foreach (var id in e.RelicsRemoved)
         {
             int idx = s.Relics.FindIndex(r => r.Id != null && r.Id.Equals(id));
-            if (idx >= 0) s.Relics.RemoveAt(idx);
+            if (idx >= 0)
+            {
+                AdjustPotionSlotCount(
+                    s,
+                    -PotionSlotBonus(s.Relics[idx].Id),
+                    $"remove {s.Relics[idx].Id}");
+                s.Relics.RemoveAt(idx);
+            }
+        }
+
+        foreach (string choice in e.RestSiteChoices)
+        {
+            if (string.Equals(choice, "LIFT", StringComparison.OrdinalIgnoreCase))
+                IncrementGirya(s.Relics);
         }
 
         // ----- Potions -----
@@ -260,12 +325,6 @@ public static class StateReconstructor
         // BoughtColorless is redundant with CardsGained for the same
         // shop floor — the CardsGained pass at the top already added
         // the purchase, so we deliberately don't iterate it here.
-
-        // ----- Completed quests -----
-        foreach (var id in e.CompletedQuests)
-        {
-            if (!s.CompletedQuests.Contains(id)) s.CompletedQuests.Add(id);
-        }
     }
 
     // SerializableCard equality includes Id + CurrentUpgradeLevel +
@@ -274,24 +333,59 @@ public static class StateReconstructor
     // matching deck card.
     private static int FindMatching(List<SerializableCard> deck, SerializableCard target)
     {
-        for (int i = 0; i < deck.Count; i++)
-        {
-            if (deck[i].Equals(target)) return i;
-        }
-        // Fall back to id-only if no exact match (the historical card
-        // may have been recorded with stale upgrade info).
-        for (int i = 0; i < deck.Count; i++)
-        {
-            if (CardIdEquals(deck[i].Id, target.Id)) return i;
-        }
-        return -1;
+        return FindBestMatching(deck, target, excluded: null, preferUnenchanted: false);
     }
 
-    private static SerializableCard? FindFirstById(List<SerializableCard> deck, ModelId id)
+    private static int FindBestMatching(
+        List<SerializableCard> deck,
+        SerializableCard target,
+        HashSet<int>? excluded,
+        bool preferUnenchanted)
     {
-        foreach (var c in deck)
-            if (CardIdEquals(c.Id, id)) return c;
-        return null;
+        int bestIndex = -1;
+        int bestScore = int.MinValue;
+        for (int i = 0; i < deck.Count; i++)
+        {
+            if (excluded?.Contains(i) == true) continue;
+            var candidate = deck[i];
+            if (!CardIdEquals(candidate.Id, target.Id)) continue;
+
+            int score = 0;
+            if (!preferUnenchanted && candidate.Equals(target)) score += 1000;
+            if (candidate.CurrentUpgradeLevel == target.CurrentUpgradeLevel) score += 100;
+            if (candidate.FloorAddedToDeck == target.FloorAddedToDeck) score += 20;
+            if (EnchantmentEquals(candidate.Enchantment, target.Enchantment)) score += 60;
+            if (preferUnenchanted && candidate.Enchantment == null) score += 200;
+            if (SavedPropertiesEqual(candidate.Props, target.Props)) score += 30;
+            if (score > bestScore)
+            {
+                bestScore = score;
+                bestIndex = i;
+            }
+        }
+        return bestIndex;
+    }
+
+    private static bool EnchantmentEquals(
+        SerializableEnchantment? left,
+        SerializableEnchantment? right)
+        => left == null
+            ? right == null
+            : right != null
+                && CardIdEquals(left.Id, right.Id)
+                && left.Amount == right.Amount
+                && SavedPropertiesEqual(left.Props, right.Props);
+
+    private static bool SavedPropertiesEqual(SavedProperties? left, SavedProperties? right)
+    {
+        if (ReferenceEquals(left, right)) return true;
+        if (left == null || right == null) return false;
+        try
+        {
+            return System.Text.Json.JsonSerializer.Serialize(left, JsonSerializationUtility.Options)
+                == System.Text.Json.JsonSerializer.Serialize(right, JsonSerializationUtility.Options);
+        }
+        catch { return false; }
     }
 
     private static SerializableCard? FindCardToUpgrade(List<SerializableCard> deck, ModelId id)
@@ -320,6 +414,84 @@ public static class StateReconstructor
 
     private static bool CardIdEquals(ModelId? a, ModelId? b) =>
         a != null && b != null && a.Equals(b);
+
+    private static int PotionSlotBonus(ModelId? id)
+    {
+        if (id == null) return 0;
+        return ModelDb.GetByIdOrNull<RelicModel>(id) switch
+        {
+            PotionBelt => 2,
+            PhialHolster => 1,
+            AlchemicalCoffer => 3,
+            _ => 0,
+        };
+    }
+
+    private static void AdjustPotionSlotCount(
+        PlayerStateSnapshot snapshot,
+        int delta,
+        string reason,
+        bool writeLog = true)
+    {
+        if (delta == 0) return;
+        int oldCount = snapshot.MaxPotionSlotCount;
+        int newCount = Math.Max(0, oldCount + delta);
+
+        // Player.SetMaxPotionCountInternal removes slots from the right. A
+        // potion in a removed slot is first moved into the lowest empty slot
+        // that survives the shrink, and is discarded only when none exists.
+        // Reproduce that native ordering for histories that predate snapshots.
+        if (newCount < oldCount)
+        {
+            for (int removedSlot = oldCount - 1; removedSlot >= newCount; removedSlot--)
+            {
+                var potion = snapshot.Potions.FirstOrDefault(p => p.SlotIndex == removedSlot);
+                if (potion == null) continue;
+
+                var occupied = new HashSet<int>(snapshot.Potions.Select(p => p.SlotIndex));
+                int destination = -1;
+                for (int slot = 0; slot < newCount; slot++)
+                {
+                    if (occupied.Contains(slot)) continue;
+                    destination = slot;
+                    break;
+                }
+
+                if (destination >= 0) potion.SlotIndex = destination;
+                else snapshot.Potions.Remove(potion);
+            }
+        }
+
+        snapshot.MaxPotionSlotCount = newCount;
+        if (writeLog)
+            GD.Print($"{RetryMod.LogPrefix}potion slots: {reason} {oldCount}->{newCount}");
+    }
+
+    private static void IncrementGirya(List<SerializableRelic> relics)
+    {
+        for (int i = 0; i < relics.Count; i++)
+        {
+            var saved = relics[i];
+            if (saved.Id == null || ModelDb.GetByIdOrNull<RelicModel>(saved.Id) is not Girya)
+                continue;
+            try
+            {
+                if (RelicModel.FromSerializable(saved) is not Girya girya) return;
+                girya.TimesLifted = Math.Min(Girya.maxLifts, girya.TimesLifted + 1);
+                var updated = girya.ToSerializable();
+                updated.FloorAddedToDeck = saved.FloorAddedToDeck;
+                relics[i] = updated;
+                GD.Print(
+                    $"{RetryMod.LogPrefix}Girya instance lift: " +
+                    $"index={i} floorAdded={saved.FloorAddedToDeck} times={girya.TimesLifted}");
+            }
+            catch (Exception ex)
+            {
+                GD.PrintErr($"{RetryMod.LogPrefix}restore Girya lift: {ex.Message}");
+            }
+            return;
+        }
+    }
 
     private static int FindSilkenTress(List<SerializableRelic> relics)
     {
@@ -374,14 +546,123 @@ public static class StateReconstructor
         snapshot.Relics[index] = serialized;
     }
 
+    private static void BackfillStableRelicProperties(
+        PlayerStateSnapshot snapshot,
+        RunHistoryPlayer historyPlayer,
+        RunHistory history,
+        int targetActIndex,
+        int targetFloorIndex)
+    {
+        foreach (var current in snapshot.Relics)
+        {
+            if (current.Id == null) continue;
+            if (snapshot.Relics.Count(r => CardIdEquals(r.Id, current.Id)) != 1) continue;
+            var finalMatches = historyPlayer.Relics
+                .Where(r => CardIdEquals(r.Id, current.Id))
+                .ToList();
+            if (finalMatches.Count != 1 || finalMatches[0].Props == null) continue;
+            if (HasFutureRelicRemoval(
+                    history, historyPlayer.Id, current.Id,
+                    targetActIndex, targetFloorIndex))
+                continue;
+
+            var model = ModelDb.GetByIdOrNull<RelicModel>(current.Id);
+            if (!HasAcquisitionFixedSavedProperties(model)) continue;
+            current.Props = finalMatches[0].Props;
+            GD.Print($"{RetryMod.LogPrefix}relic props backfilled: {current.Id} (unique acquisition-fixed instance)");
+        }
+    }
+
+    private static bool HasFutureRelicRemoval(
+        RunHistory history,
+        ulong playerId,
+        ModelId relicId,
+        int targetActIndex,
+        int targetFloorIndex)
+    {
+        for (int act = targetActIndex; act < history.MapPointHistory.Count; act++)
+        {
+            int startFloor = act == targetActIndex ? targetFloorIndex : 0;
+            for (int floor = startFloor; floor < history.MapPointHistory[act].Count; floor++)
+            {
+                try
+                {
+                    var entry = history.MapPointHistory[act][floor].GetEntry(playerId);
+                    if (entry.RelicsRemoved.Any(id => CardIdEquals(id, relicId))) return true;
+                }
+                catch { }
+            }
+        }
+        return false;
+    }
+
+    private static bool HasAcquisitionFixedSavedProperties(RelicModel? model) => model is
+        ArchaicTooth or Byrdpip or DustyTome or GoldenCompass or
+        PaelsLegion or SeaGlass or TouchOfOrobas;
+
+    private static void LogApproximateSavedProperties(PlayerStateSnapshot snapshot)
+    {
+        var approximate = new HashSet<string>();
+        foreach (var saved in snapshot.Relics)
+        {
+            if (saved.Id == null) continue;
+            var model = ModelDb.GetByIdOrNull<RelicModel>(saved.Id);
+            if (model is Girya or SilkenTress) continue;
+            if (HasAcquisitionFixedSavedProperties(model) && saved.Props != null) continue;
+            AddSavedPropertyDescription(approximate, model);
+        }
+        foreach (var saved in snapshot.Deck)
+        {
+            if (saved.Id != null)
+                AddSavedPropertyDescription(
+                    approximate, ModelDb.GetByIdOrNull<CardModel>(saved.Id));
+            if (saved.Enchantment?.Id != null)
+                AddSavedPropertyDescription(
+                    approximate,
+                    ModelDb.GetByIdOrNull<EnchantmentModel>(saved.Enchantment.Id));
+        }
+
+        if (approximate.Count > 0)
+        {
+            GD.PrintErr($"{RetryMod.LogPrefix}approximate saved properties (legacy history has no room snapshot): {string.Join(", ", approximate.OrderBy(x => x))}");
+        }
+    }
+
+    private static void AddSavedPropertyDescription(
+        HashSet<string> destination,
+        AbstractModel? model)
+    {
+        if (model == null) return;
+        var members = model.GetType()
+            .GetMembers(BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic)
+            .Where(member => member.GetCustomAttributes(
+                typeof(SavedPropertyAttribute), inherit: true).Length > 0)
+            .Select(member => member.Name)
+            .Distinct()
+            .OrderBy(name => name)
+            .ToList();
+        if (members.Count > 0)
+            destination.Add($"{model.Id}[{string.Join("/", members)}]");
+    }
+
     private static SerializableCard CloneCard(SerializableCard src, int floorNum) => new()
     {
         Id = src.Id,
         CurrentUpgradeLevel = src.CurrentUpgradeLevel,
-        Enchantment = src.Enchantment,
+        Enchantment = CloneEnchantment(src.Enchantment),
         Props = src.Props,
         FloorAddedToDeck = floorNum,
     };
+
+    private static SerializableEnchantment? CloneEnchantment(SerializableEnchantment? src) =>
+        src == null
+            ? null
+            : new SerializableEnchantment
+            {
+                Id = src.Id,
+                Amount = src.Amount,
+                Props = src.Props,
+            };
 
     private static void AddPotion(PlayerStateSnapshot s, ModelId id)
     {

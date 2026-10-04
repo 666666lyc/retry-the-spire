@@ -1,61 +1,61 @@
-// Sidecar JSON file capturing the RunRngSet.Counters at each map-
-// point transition during play, plus the actual coord visited at
-// each floor. Without per-floor coord storage we'd have to *guess*
-// which (col,row) the original player visited at floor N — the
-// MapPointHistoryEntry doesn't carry coord info.
+// Versioned, Steam-cloud-backed snapshots captured at room entry.
 //
-// File: user://retry_the_spire_rng_snapshots.json
-// Schema v3:
-//   {
-//     "version": 3,
-//     "entries": {
-//       "<startTime>|<seed>|<act>|<floor>": {
-//         "row": <int>, "col": <int>,
-//         "counters": { "<RunRngType>": <int>, ... }
-//       },
-//       ...
-//     },
-//     "legacy_entries": { "<seed>|<act>|<floor>": { ... } }
-//   }
-//
-// v2 entries remain readable as low-confidence legacy hints. Their
-// seed-only identity is ambiguous when the same seed is retried more
-// than once, so v3 never treats them as authoritative coordinates.
-// We still detect the v1 shape (top-level dict keyed by
-// "<seed>|<act>|<row,col>" → counters dict) for backward compat,
-// but it's lossless-degraded: no floor index means no exact-floor
-// lookup is possible for old entries. Capture is performed by
-// RngSnapshotCapture during real (non-retry) play; consumed here by
-// RetryRunner.NavigateToTarget when retrying.
+// The store lives beside the game's profile-scoped save files and is written
+// through the game's own ISaveStore. It never modifies native .run history.
+using System;
 using System.Collections.Generic;
+using System.IO;
+using System.IO.Compression;
+using System.Linq;
 using System.Reflection;
+using System.Text;
+using System.Text.Json;
+using System.Text.Json.Serialization;
 using Godot;
 using MegaCrit.Sts2.Core.Entities.Rngs;
 using MegaCrit.Sts2.Core.Map;
 using MegaCrit.Sts2.Core.Runs;
+using MegaCrit.Sts2.Core.Saves;
 using MegaCrit.Sts2.Core.Saves.Runs;
 
 namespace Retry;
 
 public static class RngSnapshotStore
 {
-    private const string FileName = "retry_the_spire_rng_snapshots.json";
-    private const string LegacyFileName = "retry_rng_snapshots.json";
-    private const int SchemaVersion = 3;
+    private const string FileName = "retry_the_spire_snapshots.save";
+    private const string OldTopLevelFileName = "retry_the_spire_rng_snapshots.json";
+    private const string Header = "RTS-SNAPSHOTS-4\n";
+    private const int SchemaVersion = 4;
+    private const int MaxEncodedBytes = 4 * 1024 * 1024;
+
     private static readonly FieldInfo? RunStartTimeField = typeof(RunManager).GetField(
         "_startTime", BindingFlags.Instance | BindingFlags.NonPublic);
+    private static readonly FieldInfo? SaveStoreField = typeof(SaveManager).GetField(
+        "_saveStore", BindingFlags.Instance | BindingFlags.NonPublic);
+    private static readonly JsonSerializerOptions StoreJsonOptions = new()
+    {
+        PropertyNamingPolicy = JsonNamingPolicy.SnakeCaseLower,
+        Converters = { new JsonStringEnumConverter() },
+    };
 
     public sealed class Entry
     {
-        public int Row;
-        public int Col;
-        public Dictionary<RunRngType, int> Counters = new();
+        public int Row { get; set; }
+        public int Col { get; set; }
+        public Dictionary<RunRngType, int> Counters { get; set; } = new();
+        public string? PlayersJson { get; set; }
+        public long CapturedAt { get; set; }
     }
 
-    // v3 key: $"{startTime}|{seed}|{act}|{floor}"
+    private sealed class StoreData
+    {
+        public int Version { get; set; } = SchemaVersion;
+        public Dictionary<string, Entry> Entries { get; set; } = new();
+    }
+
     private static Dictionary<string, Entry>? _cache;
-    // v2 key: $"{seed}|{act}|{floor}"
-    private static Dictionary<string, Entry>? _legacyCache;
+    private static string? _cachePath;
+    private static bool _loadedFromBackup;
 
     public static void Capture(
         long startTime,
@@ -63,16 +63,34 @@ public static class RngSnapshotStore
         int actIndex,
         int floor,
         MapCoord coord,
-        Dictionary<RunRngType, int> counters)
+        Dictionary<RunRngType, int> counters,
+        IReadOnlyList<SerializablePlayer>? players = null)
     {
         EnsureLoaded();
         if (_cache == null || startTime <= 0) return;
-        _cache[KeyFor(startTime, seed, actIndex, floor)] = new Entry
+
+        string key = KeyFor(startTime, seed, actIndex, floor);
+        if (!_cache.TryGetValue(key, out var entry))
         {
-            Row = coord.row,
-            Col = coord.col,
-            Counters = new Dictionary<RunRngType, int>(counters),
-        };
+            entry = new Entry();
+            _cache[key] = entry;
+        }
+        entry.Row = coord.row;
+        entry.Col = coord.col;
+        entry.Counters = new Dictionary<RunRngType, int>(counters);
+        entry.CapturedAt = DateTimeOffset.UtcNow.ToUnixTimeSeconds();
+        if (players != null)
+        {
+            try
+            {
+                entry.PlayersJson = JsonSerializer.Serialize(
+                    players.ToList(), JsonSerializationUtility.Options);
+            }
+            catch (Exception ex)
+            {
+                GD.PrintErr($"{RetryMod.LogPrefix}snapshot players serialize: {ex.Message}");
+            }
+        }
         TrySave();
     }
 
@@ -92,7 +110,7 @@ public static class RngSnapshotStore
             string key = KeyFor(startTime, seed, actIndex, floor);
             if (!_cache.TryGetValue(key, out var entry))
             {
-                entry = new Entry();
+                entry = new Entry { CapturedAt = DateTimeOffset.UtcNow.ToUnixTimeSeconds() };
                 _cache[key] = entry;
             }
             entry.Row = coords[floor].row;
@@ -101,6 +119,8 @@ public static class RngSnapshotStore
         TrySave();
     }
 
+    // Kept under its old name for the existing launch callers. Version 4
+    // copies the complete entry, not merely its coordinate.
     public static void CopyExactCoordinates(
         long sourceStartTime,
         long destinationStartTime,
@@ -115,63 +135,68 @@ public static class RngSnapshotStore
         {
             if (!_cache.TryGetValue(KeyFor(sourceStartTime, seed, actIndex, floor), out var source))
                 continue;
-            string destinationKey = KeyFor(destinationStartTime, seed, actIndex, floor);
-            _cache[destinationKey] = new Entry
-            {
-                Row = source.Row,
-                Col = source.Col,
-                Counters = new Dictionary<RunRngType, int>(source.Counters),
-            };
+            _cache[KeyFor(destinationStartTime, seed, actIndex, floor)] = CloneEntry(source);
             changed = true;
         }
         if (changed) TrySave();
     }
 
-    // Try to find the exact coord the original player visited at
-    // (seed, act, floor). Returns null if no snapshot exists.
     public static MapCoord? TryGetExactCoord(
         long startTime, string seed, int actIndex, int floor)
     {
         EnsureLoaded();
         if (_cache == null || startTime <= 0) return null;
-        if (!_cache.TryGetValue(KeyFor(startTime, seed, actIndex, floor), out var e)) return null;
-        return new MapCoord { row = e.Row, col = e.Col };
+        if (!_cache.TryGetValue(KeyFor(startTime, seed, actIndex, floor), out var entry)) return null;
+        return new MapCoord { row = entry.Row, col = entry.Col };
     }
 
-    public static MapCoord? TryGetLegacyCoord(string seed, int actIndex, int floor)
-    {
-        EnsureLoaded();
-        if (_legacyCache == null) return null;
-        if (!_legacyCache.TryGetValue(LegacyKeyFor(seed, actIndex, floor), out var e)) return null;
-        return new MapCoord { row = e.Row, col = e.Col };
-    }
+    // Version 4 intentionally drops ambiguous seed-only legacy hints.
+    public static MapCoord? TryGetLegacyCoord(string seed, int actIndex, int floor) => null;
 
     public static MapCoord? TryGetCoord(
         long startTime, string seed, int actIndex, int floor, bool allowLegacy = true)
-        => TryGetExactCoord(startTime, seed, actIndex, floor)
-            ?? (allowLegacy ? TryGetLegacyCoord(seed, actIndex, floor) : null);
+        => TryGetExactCoord(startTime, seed, actIndex, floor);
 
-    // Fast-forward the LIVE RunRngSet to the counters captured at
-    // the given (seed, act, floor). Returns true if a snapshot was
-    // found and applied.
+    public static SerializablePlayer? TryGetPlayerSnapshot(
+        long startTime,
+        string seed,
+        int actIndex,
+        int floor,
+        ulong playerId)
+    {
+        EnsureLoaded();
+        if (_cache == null || startTime <= 0) return null;
+        if (!_cache.TryGetValue(KeyFor(startTime, seed, actIndex, floor), out var entry)
+            || string.IsNullOrEmpty(entry.PlayersJson))
+            return null;
+        try
+        {
+            var players = JsonSerializer.Deserialize<List<SerializablePlayer>>(
+                entry.PlayersJson, JsonSerializationUtility.Options);
+            return players?.FirstOrDefault(p => p.NetId == playerId);
+        }
+        catch (Exception ex)
+        {
+            GD.PrintErr($"{RetryMod.LogPrefix}snapshot player deserialize: {ex.Message}");
+            return null;
+        }
+    }
+
     public static bool TryApplyLive(
-        MegaCrit.Sts2.Core.Runs.RunRngSet liveRng,
+        RunRngSet liveRng,
         long startTime,
         string seed,
         int actIndex,
         int floor)
     {
         EnsureLoaded();
-        Entry? e = null;
-        if (_cache != null && startTime > 0)
-            _cache.TryGetValue(KeyFor(startTime, seed, actIndex, floor), out e);
-        if (e == null && _legacyCache != null)
-            _legacyCache.TryGetValue(LegacyKeyFor(seed, actIndex, floor), out e);
-        if (e == null) return false;
+        if (_cache == null
+            || !_cache.TryGetValue(KeyFor(startTime, seed, actIndex, floor), out var entry))
+            return false;
         var save = new SerializableRunRngSet { Seed = seed };
-        foreach (var kv in e.Counters) save.Counters[kv.Key] = kv.Value;
+        foreach (var kv in entry.Counters) save.Counters[kv.Key] = kv.Value;
         try { liveRng.LoadFromSerializable(save); }
-        catch (System.Exception ex)
+        catch (Exception ex)
         {
             GD.PrintErr($"{RetryMod.LogPrefix}snapshot apply: {ex.Message}");
             return false;
@@ -182,158 +207,257 @@ public static class RngSnapshotStore
     public static bool HasSnapshot(long startTime, string seed, int actIndex, int floor)
     {
         EnsureLoaded();
-        return (_cache != null && startTime > 0
-                && _cache.ContainsKey(KeyFor(startTime, seed, actIndex, floor)))
-            || (_legacyCache != null
-                && _legacyCache.ContainsKey(LegacyKeyFor(seed, actIndex, floor)));
+        return _cache != null && startTime > 0
+            && _cache.ContainsKey(KeyFor(startTime, seed, actIndex, floor));
     }
+
+    private static Entry CloneEntry(Entry source) => new()
+    {
+        Row = source.Row,
+        Col = source.Col,
+        Counters = new Dictionary<RunRngType, int>(source.Counters),
+        PlayersJson = source.PlayersJson,
+        CapturedAt = source.CapturedAt,
+    };
 
     private static string KeyFor(long startTime, string seed, int actIndex, int floor) =>
         $"{startTime}|{seed}|{actIndex}|{floor}";
 
-    private static string LegacyKeyFor(string seed, int actIndex, int floor) =>
-        $"{seed}|{actIndex}|{floor}";
-
-    private static string FilePath(string fileName = FileName)
+    private static bool TryGetCloudStore(out ISaveStore store, out string path)
     {
-        return "user://" + fileName;
+        store = null!;
+        path = "";
+        try
+        {
+            var manager = SaveManager.Instance;
+            if (manager == null || !manager.IsProfileInitialized) return false;
+            if (SaveStoreField?.GetValue(manager) is not ISaveStore found) return false;
+            store = found;
+            path = manager.GetProfileScopedPath("saves/" + FileName);
+            return true;
+        }
+        catch (Exception ex)
+        {
+            GD.PrintErr($"{RetryMod.LogPrefix}snapshot cloud store: {ex.Message}");
+            return false;
+        }
     }
 
     private static void EnsureLoaded()
     {
-        if (_cache != null) return;
+        if (!TryGetCloudStore(out var store, out var path))
+        {
+            _cache ??= new Dictionary<string, Entry>();
+            return;
+        }
+        if (_cache != null && string.Equals(_cachePath, path, StringComparison.Ordinal)) return;
+
+        // Profiles have independent Steam-cloud namespaces. Reload instead of
+        // letting a static cache from profile N bleed into profile N+1. This
+        // also retries after an early main-menu call before profile init.
+        _cachePath = path;
         _cache = new Dictionary<string, Entry>();
-        _legacyCache = new Dictionary<string, Entry>();
+        _loadedFromBackup = false;
         try
         {
-            bool importedLegacy = false;
-            var f = FileAccess.Open(FilePath(), FileAccess.ModeFlags.Read);
-            if (f == null)
+            StoreData? data = null;
+            Exception? primaryFailure = null;
+            if (store.FileExists(path))
             {
-                // One-way, non-destructive compatibility import from the
-                // upstream Retry filename. The legacy file remains intact;
-                // subsequent writes go only to Retry the Spire's own file.
-                f = FileAccess.Open(FilePath(LegacyFileName), FileAccess.ModeFlags.Read);
-                importedLegacy = f != null;
+                try { data = Decode(ReadRequired(store, path)); }
+                catch (Exception ex) { primaryFailure = ex; }
             }
-            if (f == null) return;
-            string json;
-            using (f) json = f.GetAsText();
-            if (string.IsNullOrEmpty(json)) return;
-            var parser = new Json();
-            if (parser.Parse(json) != Error.Ok) return;
-            if (parser.Data.AsGodotDictionary() is not Godot.Collections.Dictionary outer) return;
 
-            int version = outer.ContainsKey("version") ? outer["version"].AsInt32() : 1;
-            if (version >= 3)
+            string backup = path + ".backup";
+            if (data == null && store.FileExists(backup))
             {
-                if (outer.ContainsKey("entries")
-                    && outer["entries"].AsGodotDictionary() is Godot.Collections.Dictionary entries)
-                    ReadEntries(entries, _cache);
-                if (outer.ContainsKey("legacy_entries")
-                    && outer["legacy_entries"].AsGodotDictionary() is Godot.Collections.Dictionary legacyEntries)
-                    ReadEntries(legacyEntries, _legacyCache);
-                if (importedLegacy)
-                {
-                    GD.Print($"{RetryMod.LogPrefix}imported Retry snapshot sidecar without modifying the original file");
-                    TrySave();
-                }
+                data = Decode(ReadRequired(store, backup));
+                _loadedFromBackup = true;
+                GD.PrintErr($"{RetryMod.LogPrefix}snapshot primary unavailable; recovered cloud backup: {primaryFailure?.Message ?? "primary missing"}");
             }
-            else if (version == 2)
+            if (data == null)
             {
-                if (outer.ContainsKey("entries")
-                    && outer["entries"].AsGodotDictionary() is Godot.Collections.Dictionary entries)
-                    ReadEntries(entries, _legacyCache);
-                GD.Print($"{RetryMod.LogPrefix}snapshot store v2 loaded as legacy coordinate hints");
-                if (importedLegacy) TrySave();
+                if (primaryFailure != null) throw primaryFailure;
+                return;
             }
-            else
+            if (data.Version != SchemaVersion)
             {
-                // Legacy v1 shape — top-level keyed by "<seed>|<act>|<row,col>"
-                // No floor info recoverable. Skip; rely on fresh capture going forward.
-                GD.Print($"{RetryMod.LogPrefix}snapshot store v1 detected — ignoring for floor-keyed lookups (rebuild by replaying)");
+                GD.PrintErr($"{RetryMod.LogPrefix}snapshot schema {data.Version} unsupported; starting empty v{SchemaVersion} store");
+                return;
             }
+            _cache = data.Entries ?? new Dictionary<string, Entry>();
+            GD.Print($"{RetryMod.LogPrefix}snapshot cloud store loaded path={path} entries={_cache.Count}");
         }
-        catch (System.Exception ex)
+        catch (Exception ex)
         {
-            GD.PrintErr($"{RetryMod.LogPrefix}snapshot load: {ex.Message}");
-        }
-    }
-
-    private static void ReadEntries(
-        Godot.Collections.Dictionary entries,
-        Dictionary<string, Entry> destination)
-    {
-        foreach (var key in entries.Keys)
-        {
-            if (entries[key].AsGodotDictionary() is not Godot.Collections.Dictionary e) continue;
-            var entry = new Entry
-            {
-                Row = e.ContainsKey("row") ? e["row"].AsInt32() : 0,
-                Col = e.ContainsKey("col") ? e["col"].AsInt32() : 0,
-            };
-            if (e.ContainsKey("counters")
-                && e["counters"].AsGodotDictionary() is Godot.Collections.Dictionary ctrs)
-            {
-                foreach (var ck in ctrs.Keys)
-                {
-                    if (System.Enum.TryParse<RunRngType>(ck.AsString(), out var t))
-                        entry.Counters[t] = ctrs[ck].AsInt32();
-                }
-            }
-            destination[key.AsString()] = entry;
+            GD.PrintErr($"{RetryMod.LogPrefix}snapshot load: {ex.Message}; using reconstructed history state");
+            _cache = new Dictionary<string, Entry>();
         }
     }
 
     private static void TrySave()
     {
-        if (_cache == null || _legacyCache == null) return;
+        if (_cache == null || !TryGetCloudStore(out var store, out var path)) return;
+        // Temporary/backup files are deliberately local-only. Sending their
+        // renames through CloudSaveStore would create extra Steam Cloud files;
+        // only the final profile-scoped .save belongs in the cloud cache.
+        ISaveStore localStore = store is CloudSaveStore cloud ? cloud.LocalStore : store;
+        // The game's cloud directory scan ignores names ending in .backup,
+        // so a crash cannot leave a temporary file eligible for later sync.
+        string temp = path + ".tmp.backup";
+        string backup = path + ".backup";
         try
         {
-            var entries = new Godot.Collections.Dictionary();
-            foreach (var (k, e) in _cache)
+            string encoded = Encode(new StoreData { Entries = _cache });
+            if (Encoding.UTF8.GetByteCount(encoded) > MaxEncodedBytes)
             {
-                var inner = new Godot.Collections.Dictionary
-                {
-                    ["row"] = e.Row,
-                    ["col"] = e.Col,
-                };
-                var ctrs = new Godot.Collections.Dictionary();
-                foreach (var (rt, c) in e.Counters) ctrs[rt.ToString()] = c;
-                inner["counters"] = ctrs;
-                entries[k] = inner;
+                PruneToLimit();
+                encoded = Encode(new StoreData { Entries = _cache });
             }
-            var legacyEntries = new Godot.Collections.Dictionary();
-            foreach (var (k, e) in _legacyCache)
+            if (Encoding.UTF8.GetByteCount(encoded) > MaxEncodedBytes)
+                throw new InvalidOperationException("snapshot store still exceeds 4 MiB after pruning");
+
+            if (localStore.FileExists(temp)) localStore.DeleteFile(temp);
+            localStore.WriteFile(temp, encoded);
+            if (!localStore.FileExists(temp))
+                throw new IOException("temporary snapshot file was not created");
+            _ = Decode(ReadRequired(localStore, temp));
+
+            if (_loadedFromBackup)
             {
-                var inner = new Godot.Collections.Dictionary
-                {
-                    ["row"] = e.Row,
-                    ["col"] = e.Col,
-                };
-                var ctrs = new Godot.Collections.Dictionary();
-                foreach (var (rt, c) in e.Counters) ctrs[rt.ToString()] = c;
-                inner["counters"] = ctrs;
-                legacyEntries[k] = inner;
+                // Keep the known-good backup until the replacement primary is
+                // safely installed; the existing primary may be corrupt.
+                if (localStore.FileExists(path)) localStore.DeleteFile(path);
             }
-            var outer = new Godot.Collections.Dictionary
+            else
             {
-                ["version"] = SchemaVersion,
-                ["entries"] = entries,
-                ["legacy_entries"] = legacyEntries,
-            };
-            var json = Json.Stringify(outer);
-            using var f = FileAccess.Open(FilePath(), FileAccess.ModeFlags.Write);
-            if (f == null)
-            {
-                GD.PrintErr($"{RetryMod.LogPrefix}snapshot save: cannot open {FilePath()}");
-                return;
+                if (localStore.FileExists(backup)) localStore.DeleteFile(backup);
+                if (localStore.FileExists(path)) localStore.RenameFile(path, backup);
             }
-            f.StoreString(json);
+            try { localStore.RenameFile(temp, path); }
+            catch
+            {
+                if (localStore.FileExists(backup) && !localStore.FileExists(path))
+                    localStore.RenameFile(backup, path);
+                throw;
+            }
+
+            if (store is CloudSaveStore cloudStore)
+            {
+                // Use the remote store directly so a Steam write failure is
+                // observable instead of being swallowed by CloudSaveStore's
+                // "local file preserved" fallback.
+                cloudStore.CloudStore.WriteFile(path, encoded);
+                localStore.SetLastModifiedTime(
+                    path, cloudStore.CloudStore.GetLastModifiedTime(path));
+                GD.Print($"{RetryMod.LogPrefix}snapshot cloud write path={path} bytes={Encoding.UTF8.GetByteCount(encoded)}");
+            }
+
+            _loadedFromBackup = false;
+            DeleteOldTopLevelStore();
         }
-        catch (System.Exception ex)
+        catch (Exception ex)
         {
             GD.PrintErr($"{RetryMod.LogPrefix}snapshot save: {ex.Message}");
+            try { if (localStore.FileExists(temp)) localStore.DeleteFile(temp); } catch { }
+        }
+    }
+
+    private static void PruneToLimit()
+    {
+        if (_cache == null || _cache.Count == 0) return;
+        long currentStart = GetCurrentRunStartTime();
+        var historyStarts = new HashSet<long>();
+        try
+        {
+            foreach (string name in SaveManager.Instance.GetAllRunHistoryNames())
+            {
+                if (long.TryParse(Path.GetFileNameWithoutExtension(name), out long value))
+                    historyStarts.Add(value);
+            }
+        }
+        catch { }
+
+        var groups = _cache
+            .GroupBy(kv => ParseStartTime(kv.Key))
+            .Select(g => new
+            {
+                Start = g.Key,
+                Keys = g.Select(kv => kv.Key).ToList(),
+                Captured = g.Max(kv => kv.Value.CapturedAt),
+                IsLive = g.Key == currentStart,
+                HasHistory = historyStarts.Contains(g.Key),
+            })
+            .OrderBy(g => g.IsLive)
+            .ThenBy(g => g.HasHistory)
+            .ThenBy(g => g.Captured)
+            .ToList();
+
+        foreach (var group in groups)
+        {
+            if (Encoding.UTF8.GetByteCount(Encode(new StoreData { Entries = _cache })) <= MaxEncodedBytes)
+                break;
+            if (group.IsLive) continue;
+            foreach (string key in group.Keys) _cache.Remove(key);
+            GD.Print($"{RetryMod.LogPrefix}snapshot prune startTime={group.Start} entries={group.Keys.Count}");
+        }
+
+        // A single unusually large history can exceed the cap by itself.
+        // Continue at room granularity, preferring non-current and oldest
+        // entries. Any removed room still has the normal reconstruction path.
+        foreach (var entry in _cache
+                     .OrderBy(kv => ParseStartTime(kv.Key) == currentStart)
+                     .ThenBy(kv => kv.Value.CapturedAt)
+                     .ToList())
+        {
+            if (Encoding.UTF8.GetByteCount(Encode(new StoreData { Entries = _cache })) <= MaxEncodedBytes)
+                break;
+            _cache.Remove(entry.Key);
+            GD.Print($"{RetryMod.LogPrefix}snapshot prune entry={entry.Key}");
+        }
+    }
+
+    private static long ParseStartTime(string key)
+    {
+        int separator = key.IndexOf('|');
+        return separator > 0 && long.TryParse(key[..separator], out long value) ? value : 0;
+    }
+
+    private static string Encode(StoreData data)
+    {
+        byte[] json = JsonSerializer.SerializeToUtf8Bytes(data, StoreJsonOptions);
+        using var output = new MemoryStream();
+        using (var gzip = new GZipStream(output, CompressionLevel.SmallestSize, leaveOpen: true))
+            gzip.Write(json, 0, json.Length);
+        return Header + Convert.ToBase64String(output.ToArray());
+    }
+
+    private static StoreData Decode(string encoded)
+    {
+        if (!encoded.StartsWith(Header, StringComparison.Ordinal))
+            throw new InvalidDataException("snapshot header is missing");
+        byte[] compressed = Convert.FromBase64String(encoded[Header.Length..]);
+        using var input = new MemoryStream(compressed);
+        using var gzip = new GZipStream(input, CompressionMode.Decompress);
+        return JsonSerializer.Deserialize<StoreData>(gzip, StoreJsonOptions)
+            ?? throw new InvalidDataException("snapshot JSON was empty");
+    }
+
+    private static string ReadRequired(ISaveStore store, string path) =>
+        store.ReadFile(path) ?? throw new IOException($"snapshot file {path} could not be read");
+
+    private static void DeleteOldTopLevelStore()
+    {
+        try
+        {
+            string oldPath = ProjectSettings.GlobalizePath("user://" + OldTopLevelFileName);
+            if (!File.Exists(oldPath)) return;
+            File.Delete(oldPath);
+            GD.Print($"{RetryMod.LogPrefix}removed obsolete top-level RNG snapshot store");
+        }
+        catch (Exception ex)
+        {
+            GD.PrintErr($"{RetryMod.LogPrefix}remove obsolete RNG snapshot store: {ex.Message}");
         }
     }
 }

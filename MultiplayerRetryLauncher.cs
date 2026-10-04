@@ -260,7 +260,7 @@ internal static class MultiplayerRetryLauncher
 
             PopulateCompletedHistory(runState, history, actIndex, floorIndex);
             ReplaceVisitedCoords(runState, pathThroughTarget);
-            SeedEventsFromCompletedActs(runState, history, actIndex);
+            VisitedEventSeeder.SeedCompletedActs(runState, target);
 
             // Reconstruct the current act's encounter/event counters up to,
             // but not including, the selected room.
@@ -305,8 +305,22 @@ internal static class MultiplayerRetryLauncher
                     target.SourceStartTime, save.StartTime, target.Seed,
                     act, target.MapPointHistorySoFar[act].Count);
             }
+            RngSnapshotStore.CopyExactCoordinates(
+                target.SourceStartTime,
+                save.StartTime,
+                target.Seed,
+                actIndex,
+                floorIndex + 1);
             RngSnapshotStore.CaptureCoordinates(
                 save.StartTime, target.Seed, actIndex, pathThroughTarget);
+            RngSnapshotStore.Capture(
+                save.StartTime,
+                runState.Rng.StringSeed,
+                actIndex,
+                floorIndex,
+                targetCoord,
+                runState.Rng.ToSerializable().Counters,
+                runState.Players.Select(player => player.ToSerializable()).ToList());
 
             ValidateNativeSave(save, history, targetCoord);
             var serializedWarning = ValidateSerializedTargetRoomContract(
@@ -565,26 +579,6 @@ internal static class MultiplayerRetryLauncher
             throw new InvalidOperationException("RunState._visitedMapCoords was not found");
         live.Clear();
         live.AddRange(pathThroughTarget);
-    }
-
-    private static void SeedEventsFromCompletedActs(
-        RunState runState,
-        RunHistory history,
-        int targetActIndex)
-    {
-        for (int act = 0; act < targetActIndex; act++)
-        {
-            foreach (var entry in history.MapPointHistory[act])
-            {
-                foreach (var room in entry.Rooms)
-                {
-                    if (room.RoomType != MegaCrit.Sts2.Core.Rooms.RoomType.Event || room.ModelId == null)
-                        continue;
-                    var model = ModelDb.GetByIdOrNull<EventModel>(room.ModelId);
-                    if (model != null) runState.AddVisitedEvent(model);
-                }
-            }
-        }
     }
 
     private static void ValidateNativeSave(

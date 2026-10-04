@@ -10,6 +10,7 @@
 // arrived at this coord". A Postfix gets us both the new coord and
 // access to RunState (and thus RunRngSet).
 using System;
+using System.Linq;
 using Godot;
 using HarmonyLib;
 using MegaCrit.Sts2.Core.Map;
@@ -48,7 +49,13 @@ public static class RunState_AddVisitedMapCoord_Patch
                 return;
             }
             RngSnapshotStore.Capture(
-                startTime, rng.StringSeed, __instance.CurrentActIndex, floor, coord, counters);
+                startTime,
+                rng.StringSeed,
+                __instance.CurrentActIndex,
+                floor,
+                coord,
+                counters,
+                __instance.Players.Select(player => player.ToSerializable()).ToList());
         }
         catch (Exception ex)
         {

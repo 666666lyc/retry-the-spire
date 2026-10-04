@@ -1439,10 +1439,10 @@ public static class NActMapBrowser
         var history = _history;
         var player = _player;
         var act = _currentAct;
-        GD.Print($"{RetryMod.LogPrefix}browser CONFIRM → retry act={act} floor={floor} coord=({coord.row},{coord.col})");
+        bool isMultiplayer = history.Players.Count > 1;
 
         List<MapCoord>? multiplayerPath = null;
-        if (history.Players.Count > 1)
+        if (isMultiplayer)
         {
             var fullPath = _actVisited != null && act < _actVisited.Length
                 ? _actVisited[act]
@@ -1461,25 +1461,24 @@ public static class NActMapBrowser
             multiplayerPath = fullPath.Take(targetPathIndex + 1).ToList();
         }
 
-        NMainMenu? multiplayerMainMenu = null;
-        ulong multiplayerHostNetId = 0;
-        if (history.Players.Count > 1)
-        {
-            multiplayerMainMenu = FindMainMenu(_hiddenMenu)
-                ?? FindMainMenu(NGame.Instance?.RootSceneContainer?.CurrentScene);
-            multiplayerHostNetId = _savedLocalNetId ?? player.Id;
-        }
+        // Lock before any modal or launch work. Extracted NConfirmButton
+        // instances can emit Released more than once for a single click.
+        _commitInProgress = true;
+        GD.Print($"{RetryMod.LogPrefix}browser CONFIRM → retry mode={(isMultiplayer ? "multiplayer" : "singleplayer")} act={act} floor={floor} coord=({coord.row},{coord.col})");
+
+        NMainMenu? mainMenu = FindMainMenu(_hiddenMenu)
+            ?? FindMainMenu(NGame.Instance?.RootSceneContainer?.CurrentScene);
+        ulong multiplayerHostNetId = isMultiplayer ? (_savedLocalNetId ?? player.Id) : 0;
 
         void DoRetry(bool browserAlreadyClosed = false)
         {
-            if (history.Players.Count > 1)
+            if (isMultiplayer)
             {
                 if (multiplayerPath == null) return;
-                _commitInProgress = true;
                 MultiplayerRetryLauncher.Begin(
                     history, player, act, floor, coord,
                     multiplayerPath, multiplayerHostNetId,
-                    multiplayerMainMenu, browserAlreadyClosed);
+                    mainMenu, browserAlreadyClosed);
                 return;
             }
 
@@ -1502,66 +1501,69 @@ public static class NActMapBrowser
         // current_run.save (single-player) and current_run_mp.save
         // (multiplayer). A multiplayer retry must not prompt for, load,
         // or delete the single-player slot.
-        bool hasSave = history.Players.Count > 1
+        bool hasSave = isMultiplayer
             ? MegaCrit.Sts2.Core.Saves.SaveManager.Instance?.HasMultiplayerRunSave == true
             : MegaCrit.Sts2.Core.Saves.SaveManager.Instance?.HasRunSave == true;
         if (hasSave)
         {
-            if (history.Players.Count > 1)
+            // NModalContainer.Instance resolves to the preview NRun's modal
+            // layer while View Acts is open. Popups added there render behind
+            // the browser HUD. Capture launch data above, close the preview,
+            // then wait for its queued free before resolving the menu modal.
+            if (mainMenu == null)
             {
-                // NModalContainer.Instance resolves to the preview NRun's
-                // modal layer while View Acts is open. A popup added there
-                // renders behind the browser HUD, so CONFIRM appeared to do
-                // nothing. Capture all launch data above, close the preview,
-                // then wait one frame for its queued free before resolving
-                // the menu's modal container.
-                if (multiplayerMainMenu == null)
-                {
-                    GD.PrintErr($"{RetryMod.LogPrefix}multiplayer host: main menu unavailable for save confirmation");
-                    return;
-                }
-
-                _commitInProgress = true;
-                var tree = multiplayerMainMenu.GetTree();
-                Close();
-                tree.CreateTimer(0.05).Connect("timeout", Callable.From(() =>
-                {
-                    RetryAbandonModal.Show(
-                        title: "Abandon saved multiplayer run?",
-                        body: "Starting this retry will overwrite your existing multiplayer saved run. Your single-player save is not affected.",
-                        onChoice: c =>
-                        {
-                            if (c == RetryAbandonModal.Choice.Cancel) return;
-                            RetryRunner.PerformMultiplayerAbandon(
-                                writeHistory: c == RetryAbandonModal.Choice.AbandonSave,
-                                localPlayerId: multiplayerHostNetId);
-                            DoRetry(browserAlreadyClosed: true);
-                        });
-                }));
+                GD.PrintErr($"{RetryMod.LogPrefix}browser save confirmation failed: main menu unavailable mode={(isMultiplayer ? "multiplayer" : "singleplayer")}");
+                _commitInProgress = false;
                 return;
             }
 
-            // If the on-disk save corresponds to the SAME run we're
-            // retrying, the user knows what's there — no need to
-            // confront them with a modal. Otherwise it's a different
-            // run they'd be wiping out.
-            RetryAbandonModal.Show(
-                title: "Abandon saved run?",
-                body: "Starting a retry will overwrite your existing saved run.",
-                onChoice: c =>
-                {
-                    if (c == RetryAbandonModal.Choice.Cancel) return;
-                    // hasSave path: no live run to tear down — the
-                    // PerformAbandon path that touches CleanUp is
-                    // only for true in-progress runs.
-                    RetryRunner.PerformAbandon(
-                        writeHistory: c == RetryAbandonModal.Choice.AbandonSave,
-                        inProgress: false);
-                    DoRetry();
-                });
+            var tree = mainMenu.GetTree();
+            GD.Print($"{RetryMod.LogPrefix}browser save confirmation: closing preview mode={(isMultiplayer ? "multiplayer" : "singleplayer")}");
+            Close();
+            tree.CreateTimer(0.05).Connect("timeout", Callable.From(() =>
+            {
+                string title = isMultiplayer
+                    ? "Abandon saved multiplayer run?"
+                    : "Abandon saved run?";
+                string body = isMultiplayer
+                    ? "Starting this retry will overwrite your existing multiplayer saved run. Your single-player save is not affected."
+                    : "Starting this retry will overwrite your existing saved run.";
+
+                GD.Print($"{RetryMod.LogPrefix}browser save confirmation: showing mode={(isMultiplayer ? "multiplayer" : "singleplayer")}");
+                RetryAbandonModal.Show(
+                    title: title,
+                    body: body,
+                    onChoice: c =>
+                    {
+                        if (c == RetryAbandonModal.Choice.Cancel)
+                        {
+                            GD.Print($"{RetryMod.LogPrefix}browser retry cancelled at save confirmation mode={(isMultiplayer ? "multiplayer" : "singleplayer")}");
+                            return;
+                        }
+
+                        bool writeHistory = c == RetryAbandonModal.Choice.AbandonSave;
+                        if (isMultiplayer)
+                        {
+                            RetryRunner.PerformMultiplayerAbandon(
+                                writeHistory: writeHistory,
+                                localPlayerId: multiplayerHostNetId);
+                        }
+                        else
+                        {
+                            RetryRunner.PerformAbandon(
+                                writeHistory: writeHistory,
+                                inProgress: false);
+                        }
+
+                        GD.Print($"{RetryMod.LogPrefix}browser save confirmation accepted mode={(isMultiplayer ? "multiplayer" : "singleplayer")} writeHistory={writeHistory}");
+                        DoRetry(browserAlreadyClosed: true);
+                    });
+            }));
+            return;
         }
         else
         {
+            GD.Print($"{RetryMod.LogPrefix}browser retry starting without save confirmation mode={(isMultiplayer ? "multiplayer" : "singleplayer")}");
             DoRetry();
         }
     }

@@ -31,13 +31,28 @@ public static class RetryAbandonModal
         string body,
         Action<Choice> onChoice)
     {
+        bool completed = false;
+        void Complete(Choice choice, string reason)
+        {
+            if (completed) return;
+            completed = true;
+            GD.Print($"{RetryMod.LogPrefix}abandon modal choice={choice} reason={reason} title={title}");
+            onChoice(choice);
+        }
+
         try
         {
             var modal = NModalContainer.Instance;
             if (modal == null)
             {
-                GD.PrintErr($"{RetryMod.LogPrefix}abandon modal: no NModalContainer.Instance — falling back to AbandonSave");
-                onChoice(Choice.AbandonSave);
+                GD.PrintErr($"{RetryMod.LogPrefix}abandon modal failed: no NModalContainer.Instance");
+                Complete(Choice.Cancel, "missing-container");
+                return;
+            }
+            if (modal.OpenModal != null)
+            {
+                GD.PrintErr($"{RetryMod.LogPrefix}abandon modal failed: another modal is already open title={title}");
+                Complete(Choice.Cancel, "container-occupied");
                 return;
             }
 
@@ -46,23 +61,43 @@ public static class RetryAbandonModal
             var popup = NAbandonRunConfirmPopup.Create(mainMenu: null);
             if (popup == null)
             {
-                GD.PrintErr($"{RetryMod.LogPrefix}abandon modal: popup Create returned null (TestMode?) — defaulting to AbandonSave");
-                onChoice(Choice.AbandonSave);
+                GD.PrintErr($"{RetryMod.LogPrefix}abandon modal failed: popup Create returned null (TestMode?)");
+                Complete(Choice.Cancel, "create-failed");
                 return;
             }
+
+            GD.Print($"{RetryMod.LogPrefix}abandon modal creating title={title}");
 
             // Wire AFTER the popup's _Ready runs (which resolves
             // _verticalPopup and wires its default Yes/No handlers).
             // TreeEntered would be too early — it fires before _Ready.
             popup.Connect(Node.SignalName.Ready,
-                Callable.From(() => InitAfterReady(popup, title, body, onChoice)),
+                Callable.From(() => InitAfterReady(popup, title, body, Complete)),
                 (uint)GodotObject.ConnectFlags.OneShot);
             modal.Add(popup);
+
+            // _Ready runs synchronously when the popup enters the tree. If
+            // initialization failed, InitAfterReady already completed this
+            // request as Cancel and cleared the modal.
+            if (completed) return;
+
+            // NModalContainer refuses Add while another modal is active.
+            // It only logs a warning, so explicitly verify that our popup
+            // was accepted instead of leaving the caller waiting forever.
+            if (modal.OpenModal == null || popup.GetParent() == null || !popup.IsInsideTree())
+            {
+                GD.PrintErr($"{RetryMod.LogPrefix}abandon modal failed: container rejected popup title={title}");
+                try { popup.QueueFree(); } catch { }
+                Complete(Choice.Cancel, "container-rejected");
+                return;
+            }
+
+            GD.Print($"{RetryMod.LogPrefix}abandon modal shown title={title}");
         }
         catch (Exception ex)
         {
-            GD.PrintErr($"{RetryMod.LogPrefix}abandon modal show: {ex.Message}");
-            onChoice(Choice.AbandonSave); // fail safe — keep current behavior
+            GD.PrintErr($"{RetryMod.LogPrefix}abandon modal failed: {ex.Message}");
+            Complete(Choice.Cancel, "exception");
         }
     }
 
@@ -70,7 +105,7 @@ public static class RetryAbandonModal
         NAbandonRunConfirmPopup popup,
         string title,
         string body,
-        Action<Choice> onChoice)
+        Action<Choice, string> complete)
     {
         try
         {
@@ -83,12 +118,9 @@ public static class RetryAbandonModal
             // here overwrites the text + adds extra connections.
             vp.DisconnectSignals();
 
-            bool choiceMade = false;
             void Pick(Choice c)
             {
-                if (choiceMade) return;
-                choiceMade = true;
-                onChoice(c);
+                complete(c, "user");
             }
 
             // Cancel (No) — left button. Standard "dismiss".
@@ -102,12 +134,13 @@ public static class RetryAbandonModal
 
             // Add a third "Abandon (no save)" button by duplicating
             // the YesButton. Positioned to the right of YesButton.
-            try { AddNoSaveButton(vp, () => Pick(Choice.AbandonNoSave)); }
-            catch (Exception ex) { GD.PrintErr($"{RetryMod.LogPrefix}abandon modal third btn: {ex.Message}"); }
+            AddNoSaveButton(vp, () => Pick(Choice.AbandonNoSave));
         }
         catch (Exception ex)
         {
-            GD.PrintErr($"{RetryMod.LogPrefix}abandon modal init: {ex.Message}");
+            GD.PrintErr($"{RetryMod.LogPrefix}abandon modal init failed: {ex.Message}");
+            complete(Choice.Cancel, "init-failed");
+            try { NModalContainer.Instance?.Clear(); } catch { }
         }
     }
 
@@ -164,7 +197,7 @@ public static class RetryAbandonModal
             else
             {
                 onConfirmed();
-                NModalContainer.Instance.Clear();
+                NModalContainer.Instance?.Clear();
             }
         }));
     }

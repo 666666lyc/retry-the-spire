@@ -57,6 +57,15 @@ public static class RetryRunner
             return;
         }
         GD.Print($"{RetryMod.LogPrefix}history click resolved to act={actIndex} floor={floorIndex} seed={history.Seed}");
+        if (history.Players.Count > 1)
+        {
+            // A multiplayer history must retain every recorded player and use
+            // the native multiplayer save slot. The single-player new-run
+            // pipeline below intentionally reconstructs only one selected
+            // player and would otherwise overwrite current_run.save.
+            NActMapBrowser.Open(history, player);
+            return;
+        }
         // For now launch the retry directly (no coord — player lands
         // at act start). Once ActMapViewer lands the path becomes
         // "open viewer → user picks coord → Begin()".
@@ -649,6 +658,12 @@ public static class RetryRunner
         try { HistoryPrePopulator.Apply(runState, target); }
         catch (Exception ex) { GD.PrintErr($"{RetryMod.LogPrefix}history prepop: {ex.Message}"); }
 
+        // Visited events are run-global state, not part of SerializablePlayer.
+        // Restore completed acts directly; current-act events are added by the
+        // queue simulation below so its eventsVisited counter advances too.
+        try { VisitedEventSeeder.SeedCompletedActs(runState, target); }
+        catch (Exception ex) { GD.PrintErr($"{RetryMod.LogPrefix}seed visited events: {ex.Message}"); }
+
         try { EventListPatcher.AlignToHistory(runState, target); }
         catch (Exception ex) { GD.PrintErr($"{RetryMod.LogPrefix}align events: {ex.Message}"); }
 
@@ -666,6 +681,12 @@ public static class RetryRunner
                     target.SourceStartTime, destinationStartTime, target.Seed,
                     act, target.MapPointHistorySoFar[act].Count);
             }
+            RngSnapshotStore.CopyExactCoordinates(
+                target.SourceStartTime,
+                destinationStartTime,
+                target.Seed,
+                target.TargetActIndex,
+                target.TargetFloorIndex + 1);
             RngSnapshotStore.CaptureCoordinates(
                 destinationStartTime, target.Seed, target.TargetActIndex,
                 path.Select(point => point.coord).ToList());
@@ -683,6 +704,26 @@ public static class RetryRunner
                 target.TargetActIndex, target.TargetFloorIndex);
         }
         catch (Exception ex) { GD.PrintErr($"{RetryMod.LogPrefix}snapshot apply: {ex.Message}"); }
+
+        // Seed the destination run identity with the fully restored room-entry
+        // state. This also makes re-retrying a reconstructed legacy history
+        // exact from this point onward.
+        try
+        {
+            long destinationStartTime = RngSnapshotStore.GetCurrentRunStartTime();
+            RngSnapshotStore.Capture(
+                destinationStartTime,
+                runState.Rng.StringSeed,
+                target.TargetActIndex,
+                target.TargetFloorIndex,
+                targetCoord,
+                runState.Rng.ToSerializable().Counters,
+                runState.Players.Select(player => player.ToSerializable()).ToList());
+        }
+        catch (Exception ex)
+        {
+            GD.PrintErr($"{RetryMod.LogPrefix}snapshot seed restored state: {ex.Message}");
+        }
 
         // If the target's MapPointType is Unknown, force the
         // historical RoomType. Otherwise the live UnknownMapPoint
