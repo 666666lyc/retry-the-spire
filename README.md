@@ -4,6 +4,8 @@ Retry the current room or resume a *Slay the Spire 2* run from any visited map n
 
 **[Steam Workshop](https://steamcommunity.com/sharedfiles/filedetails/?id=3813193061)** · **[Latest release](https://github.com/666666lyc/retry-the-spire/releases/latest)** · **[Installation guide](INSTALL.md)**
 
+Current release: **v0.5.3**
+
 [English](#english) | [简体中文](#简体中文)
 
 > [!IMPORTANT]
@@ -53,6 +55,7 @@ The host falls back to the game's native replacement lobby. Updated peers find a
 - Versioned room-entry player, map, and RNG snapshots when available.
 - Original multiplayer participants under their recorded Steam IDs.
 - Separate single-player and multiplayer save slots.
+- Unmodified Standard history retries remain eligible to unlock the next ascension level in both single-player and multiplayer.
 
 Snapshots are stored beside the active profile saves, allowing Steam Cloud to carry exact retries across devices.
 
@@ -156,6 +159,7 @@ Retry the Spire 提供两种重打方式，不必为了再试一次而放弃整�
 - 可用的版本化房间入口玩家状态、地图和随机数快照。
 - 原多人对局的参与者及其 Steam ID。
 - 相互独立的单人和多人存档槽。
+- 未修改的标准模式历史重打在单人和多人模式中均可正常解锁下一进阶等级。
 
 快照与当前档案的存档放在一起，因此 Steam 云可以将精确重打数据同步到其他设备。
 

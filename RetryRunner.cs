@@ -358,14 +358,19 @@ public static class RetryRunner
 
             try { NAudioManager.Instance?.StopMusic(); } catch { }
 
-            // A retry is conceptually a custom-seed run regardless of
-            // what mode the original was — same-seed replay is what
-            // GameMode.Custom describes, and stamping it that way
-            // also keeps the run out of the daily / standard leader-
-            // boards.
+            // Preserve progression eligibility when replaying an unmodified
+            // Standard history entry. The game only awards ascension
+            // progression to Standard runs, so forcing every retry to Custom
+            // prevented single-player history retries from unlocking the next
+            // ascension level. Custom, daily, and modified histories remain
+            // Custom so they cannot accidentally gain Standard progression.
+            var retryGameMode = target.GameMode == GameMode.Standard
+                && target.Modifiers.Count == 0
+                    ? GameMode.Standard
+                    : GameMode.Custom;
             var runState = await NGame.Instance.StartNewSingleplayerRun(
                 character, shouldSave: true, acts, modifiers,
-                target.Seed, GameMode.Custom, target.Ascension);
+                target.Seed, retryGameMode, target.Ascension);
 
             // EnterAct(0) inside StartRun has already fired by now;
             // any later EnterMapCoord(StartingMapPoint) is OURS (e.g.
