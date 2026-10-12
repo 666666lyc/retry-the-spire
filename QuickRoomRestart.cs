@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using System.Linq;
 using System.Reflection;
 using System.Threading.Tasks;
@@ -7,6 +8,8 @@ using HarmonyLib;
 using MegaCrit.Sts2.Core.Combat;
 using MegaCrit.Sts2.Core.Context;
 using MegaCrit.Sts2.Core.Entities.Multiplayer;
+using MegaCrit.Sts2.Core.Entities.Rngs;
+using MegaCrit.Sts2.Core.Models;
 using MegaCrit.Sts2.Core.Multiplayer;
 using MegaCrit.Sts2.Core.Multiplayer.Game;
 using MegaCrit.Sts2.Core.Multiplayer.Game.Lobby;
@@ -14,12 +17,20 @@ using MegaCrit.Sts2.Core.Nodes;
 using MegaCrit.Sts2.Core.Nodes.GodotExtensions;
 using MegaCrit.Sts2.Core.Nodes.Screens.MainMenu;
 using MegaCrit.Sts2.Core.Nodes.Screens.PauseMenu;
+using MegaCrit.Sts2.Core.Rooms;
 using MegaCrit.Sts2.Core.Runs;
 using MegaCrit.Sts2.Core.Saves;
 using MegaCrit.Sts2.Core.Saves.Runs;
 using MegaCrit.Sts2.addons.mega_text;
 
 namespace Retry;
+
+internal enum RestartMode
+{
+    Exact,
+    RerollEncounter,
+    RerollShuffle,
+}
 
 /// <summary>
 /// Reloads the native room-entry save without first writing the current
@@ -39,11 +50,27 @@ public static class QuickRoomRestart
     private static SerializableRun? _preparedMultiplayerSave;
     private static RunState? _preparedMultiplayerState;
     private static ulong _preparedMultiplayerHostId;
+    private static readonly Dictionary<string, int> LastShuffleCounters = new();
 
     internal static bool CanDirectReload => RunLobbyBackingField != null;
 
     internal static bool IsNetworkPreservingCleanup
         => _networkPreservingCleanupDepth > 0;
+
+    internal static bool CanRerollCombat
+    {
+        get
+        {
+            try
+            {
+                return CanRestart(out _) && TryGetActiveCombat(out _, out _);
+            }
+            catch
+            {
+                return false;
+            }
+        }
+    }
 
     public static bool CanRestart(out bool multiplayer)
     {
@@ -67,14 +94,17 @@ public static class QuickRoomRestart
     }
 
     public static void Begin()
+        => Begin(RestartMode.Exact);
+
+    internal static void Begin(RestartMode mode)
     {
         if (_restartInProgress) return;
         _restartInProgress = true;
         _liveRunCleaned = false;
         if (CanRestart(out bool multiplayer) && multiplayer)
-            _ = PrepareMultiplayerRestartAsync();
+            _ = PrepareMultiplayerRestartAsync(mode);
         else
-            _ = RestartAsync();
+            _ = RestartAsync(mode);
     }
 
     internal static void ContinueAfterPreparation()
@@ -122,7 +152,7 @@ public static class QuickRoomRestart
         _preparedMultiplayerHostId = 0;
     }
 
-    private static async Task PrepareMultiplayerRestartAsync()
+    private static async Task PrepareMultiplayerRestartAsync(RestartMode mode)
     {
         try
         {
@@ -153,10 +183,14 @@ public static class QuickRoomRestart
             // Validate before negotiating. Once a direct commit is sent the
             // old run will be torn down on every peer and cannot be recovered.
             RunState directState;
-            try { directState = RunState.FromSerializable(read.SaveData); }
+            try
+            {
+                PrepareLoadedSave(read.SaveData, mode);
+                directState = RunState.FromSerializable(read.SaveData);
+            }
             catch (Exception ex)
             {
-                ShowError($"多人入口存档无法还原：{ex.Message}", resetGuard: true);
+                ShowError($"多人重打准备失败：{ex.Message}", resetGuard: true);
                 return;
             }
 
@@ -173,7 +207,7 @@ public static class QuickRoomRestart
         }
     }
 
-    private static async Task RestartAsync()
+    private static async Task RestartAsync(RestartMode mode)
     {
         try
         {
@@ -199,10 +233,14 @@ public static class QuickRoomRestart
                 // Deserialize before touching the live run. A corrupt save
                 // must never turn a recoverable battle into a forced exit.
                 RunState restored;
-                try { restored = RunState.FromSerializable(read.SaveData); }
+                try
+                {
+                    PrepareLoadedSave(read.SaveData, mode);
+                    restored = RunState.FromSerializable(read.SaveData);
+                }
                 catch (Exception ex)
                 {
-                    ShowError($"入口存档无法还原：{ex.Message}", resetGuard: true);
+                    ShowError($"重打准备失败：{ex.Message}", resetGuard: true);
                     return;
                 }
 
@@ -227,6 +265,206 @@ public static class QuickRoomRestart
                 ShowError($"重打加载失败：{ex.Message}", resetGuard: true);
             }
         }
+    }
+
+    private static void PrepareLoadedSave(SerializableRun save, RestartMode mode)
+    {
+        bool hasActiveCombat = TryGetActiveCombat(out var liveState, out var currentEncounter);
+        if (mode != RestartMode.Exact && !hasActiveCombat)
+            throw new InvalidOperationException("只有正在进行的战斗可以使用重掷功能。");
+
+        // A previous encounter reroll may only exist in the active in-memory
+        // run. Mirror the live encounter into the room queue before applying
+        // the next operation so a shuffle reroll or exact restart cannot
+        // silently restore the original enemy. PreFinishedRoom is optional in
+        // native combat-entry saves; the queue is the authoritative fallback.
+        if (hasActiveCombat)
+        {
+            SetSavedEncounter(save, currentEncounter!, currentEncounter!);
+            PreserveLastShuffleCounter(save, liveState!);
+        }
+
+        switch (mode)
+        {
+            case RestartMode.Exact:
+                return;
+            case RestartMode.RerollEncounter:
+                RerollEncounter(save, liveState!, currentEncounter!);
+                return;
+            case RestartMode.RerollShuffle:
+                RerollShuffle(save, liveState!);
+                return;
+            default:
+                throw new ArgumentOutOfRangeException(nameof(mode), mode, null);
+        }
+    }
+
+    private static void RerollEncounter(
+        SerializableRun save,
+        RunState liveState,
+        EncounterModel current)
+    {
+        IEnumerable<EncounterModel> pool = current.RoomType switch
+        {
+            RoomType.Monster when current.IsWeak => liveState.Act.AllWeakEncounters,
+            RoomType.Monster => liveState.Act.AllRegularEncounters,
+            RoomType.Elite => liveState.Act.AllEliteEncounters,
+            RoomType.Boss => liveState.Act.AllBossEncounters,
+            _ => Array.Empty<EncounterModel>(),
+        };
+
+        var candidates = pool
+            .Where(encounter => !encounter.IsDebugEncounter && encounter.Id != current.Id)
+            .GroupBy(encounter => encounter.Id)
+            .Select(group => group.First())
+            .ToList();
+        if (candidates.Count == 0)
+            throw new InvalidOperationException("当前章节没有其他同层级遭遇可供重掷。");
+
+        var selected = candidates[
+            System.Security.Cryptography.RandomNumberGenerator.GetInt32(candidates.Count)];
+        SetSavedEncounter(save, current, selected);
+        GD.Print(
+            $"{RetryMod.LogPrefix}encounter reroll: {current.Id} -> {selected.Id} " +
+            $"act={liveState.CurrentActIndex} type={current.RoomType} weak={current.IsWeak}");
+    }
+
+    private static bool TryGetActiveCombat(
+        out RunState? liveState,
+        out EncounterModel? encounter)
+    {
+        liveState = null;
+        encounter = null;
+        try
+        {
+            var runManager = RunManager.Instance;
+            var combatManager = CombatManager.Instance;
+            if (runManager == null || !runManager.IsInProgress
+                || combatManager == null || !combatManager.IsInProgress)
+                return false;
+
+            var combatState = combatManager.DebugOnlyGetState();
+            if (combatState == null) return false;
+            liveState = combatState.RunState as RunState
+                ?? StateAccessor.GetState(runManager);
+            encounter = combatState.Encounter;
+            return liveState != null && encounter != null;
+        }
+        catch
+        {
+            liveState = null;
+            encounter = null;
+            return false;
+        }
+    }
+
+    private static void SetSavedEncounter(
+        SerializableRun save,
+        EncounterModel current,
+        EncounterModel replacement)
+    {
+        if (save.Acts == null
+            || save.CurrentActIndex < 0
+            || save.CurrentActIndex >= save.Acts.Count)
+            throw new InvalidOperationException("房间入口存档的章节索引无效。");
+
+        var rooms = save.Acts[save.CurrentActIndex].SerializableRooms
+            ?? throw new InvalidOperationException("房间入口存档缺少本章节的遭遇队列。");
+
+        switch (current.RoomType)
+        {
+            case RoomType.Monster:
+                ReplaceQueuedEncounter(
+                    rooms.NormalEncounterIds,
+                    rooms.NormalEncountersVisited,
+                    replacement.Id,
+                    "普通战斗");
+                break;
+            case RoomType.Elite:
+                ReplaceQueuedEncounter(
+                    rooms.EliteEncounterIds,
+                    rooms.EliteEncountersVisited,
+                    replacement.Id,
+                    "精英战斗");
+                break;
+            case RoomType.Boss:
+                if (current.Id == rooms.BossId)
+                    rooms.BossId = replacement.Id;
+                else if (current.Id == rooms.SecondBossId)
+                    rooms.SecondBossId = replacement.Id;
+                else if (rooms.BossEncountersVisited <= 0)
+                    rooms.BossId = replacement.Id;
+                else
+                    rooms.SecondBossId = replacement.Id;
+                break;
+            default:
+                throw new InvalidOperationException(
+                    $"当前遭遇类型 {current.RoomType} 不支持重打同步。");
+        }
+
+        var savedRoom = save.PreFinishedRoom;
+        if (savedRoom != null && savedRoom.EncounterId != replacement.Id)
+        {
+            savedRoom.EncounterId = replacement.Id;
+            savedRoom.EncounterState.Clear();
+        }
+    }
+
+    private static void ReplaceQueuedEncounter(
+        List<ModelId> encounterIds,
+        int encountersVisited,
+        ModelId replacementId,
+        string queueName)
+    {
+        if (encounterIds == null || encounterIds.Count == 0)
+            throw new InvalidOperationException($"房间入口存档的{queueName}队列为空。");
+        if (encountersVisited < 0)
+            throw new InvalidOperationException($"房间入口存档的{queueName}计数无效。");
+
+        int index = encountersVisited % encounterIds.Count;
+        encounterIds[index] = replacementId;
+    }
+
+    private static void RerollShuffle(SerializableRun save, RunState liveState)
+    {
+        var rng = save.SerializableRng
+            ?? throw new InvalidOperationException("房间入口存档缺少随机数状态。");
+        rng.Counters.TryGetValue(RunRngType.Shuffle, out int savedCounter);
+
+        string key = ShuffleCounterKey(save, liveState);
+        int lastCounter = LastShuffleCounters.TryGetValue(key, out int used)
+            ? used
+            : savedCounter;
+        int baseCounter = Math.Max(savedCounter, lastCounter);
+        if (baseCounter == int.MaxValue)
+            throw new InvalidOperationException("洗牌随机数计数已达到上限。");
+
+        int nextCounter = baseCounter + 1;
+        rng.Counters[RunRngType.Shuffle] = nextCounter;
+        LastShuffleCounters[key] = nextCounter;
+        GD.Print(
+            $"{RetryMod.LogPrefix}shuffle reroll: {savedCounter} -> {nextCounter} key={key}");
+    }
+
+    private static void PreserveLastShuffleCounter(SerializableRun save, RunState liveState)
+    {
+        var rng = save.SerializableRng;
+        if (rng == null) return;
+
+        string key = ShuffleCounterKey(save, liveState);
+        if (!LastShuffleCounters.TryGetValue(key, out int lastCounter)) return;
+        rng.Counters.TryGetValue(RunRngType.Shuffle, out int savedCounter);
+        if (lastCounter > savedCounter)
+            rng.Counters[RunRngType.Shuffle] = lastCounter;
+    }
+
+    private static string ShuffleCounterKey(SerializableRun save, RunState liveState)
+    {
+        var location = liveState.MapLocation;
+        string coord = location.coord is { } value
+            ? $"{value.row},{value.col}"
+            : "none";
+        return $"{save.StartTime}|{location.actIndex}|{coord}";
     }
 
     private static async Task RestartSingleplayerAsync(
@@ -498,20 +736,36 @@ internal sealed class DirectLoadRunLobbyListener : ILoadRunLobbyListener
 [HarmonyPatch(typeof(NPauseMenu), "_Ready")]
 public static class NPauseMenu_QuickRestart_Patch
 {
-    private const string ButtonName = "RetryTheSpireQuickRoomRestartButton";
+    private const string RestartButtonName = "RetryTheSpireQuickRoomRestartButton";
+    private const string EncounterButtonName = "RetryTheSpireRerollEncounterButton";
+    private const string ShuffleButtonName = "RetryTheSpireRerollShuffleButton";
 
     private static readonly FieldInfo? ResumeButtonField = typeof(NPauseMenu).GetField(
         "_resumeButton", BindingFlags.Instance | BindingFlags.NonPublic);
     private static readonly FieldInfo? SettingsButtonField = typeof(NPauseMenu).GetField(
         "_settingsButton", BindingFlags.Instance | BindingFlags.NonPublic);
 
+    private sealed class MenuButtonState
+    {
+        internal required NPauseMenu Menu { get; init; }
+        internal required NPauseMenuButton Resume { get; init; }
+        internal required NPauseMenuButton Settings { get; init; }
+        internal required NPauseMenuButton Restart { get; init; }
+        internal required NPauseMenuButton Encounter { get; init; }
+        internal required NPauseMenuButton Shuffle { get; init; }
+        internal required Node Parent { get; init; }
+        internal required Dictionary<NPauseMenuButton, Vector2> OriginalPositions { get; init; }
+        internal required Vector2 SettingsPosition { get; init; }
+        internal required float Spacing { get; init; }
+        internal required Control.FocusModeEnum VisibleFocusMode { get; init; }
+    }
+
     static void Postfix(NPauseMenu __instance)
     {
         if (!RetryMod.Enabled) return;
         try
         {
-            if (!QuickRoomRestart.CanRestart(out _)) return;
-            if (__instance.FindChild(ButtonName, recursive: true, owned: false) != null) return;
+            if (__instance.FindChild(RestartButtonName, recursive: true, owned: false) != null) return;
 
             var resume = ResumeButtonField?.GetValue(__instance) as NPauseMenuButton;
             var settings = SettingsButtonField?.GetValue(__instance) as NPauseMenuButton;
@@ -520,55 +774,129 @@ public static class NPauseMenu_QuickRestart_Patch
             const int duplicateFlags = (int)(Node.DuplicateFlags.Groups
                 | Node.DuplicateFlags.Scripts
                 | Node.DuplicateFlags.UseInstantiation);
-            var button = (NPauseMenuButton)resume.Duplicate(duplicateFlags);
-            CloneMaterials(button);
-            button.Name = ButtonName;
+            var specs = new (string Name, string Text, string Tooltip, RestartMode Mode)[]
+            {
+                (RestartButtonName, "重打", "从本关入口存档重新开始", RestartMode.Exact),
+                (EncounterButtonName, "遭遇重掷", "更换同层级遭遇并重新开始战斗", RestartMode.RerollEncounter),
+                (ShuffleButtonName, "牌序重掷", "重掷洗牌顺序并重新开始战斗", RestartMode.RerollShuffle),
+            };
+
+            var buttons = new List<NPauseMenuButton>(specs.Length);
+            foreach (var spec in specs)
+            {
+                var button = (NPauseMenuButton)resume.Duplicate(duplicateFlags);
+                CloneMaterials(button);
+                button.Name = spec.Name;
+                SetButtonText(button, spec.Text);
+                button.TooltipText = spec.Tooltip;
+                button.Visible = false;
+                RestartMode mode = spec.Mode;
+                button.Connect(
+                    NClickableControl.SignalName.Released,
+                    Callable.From<NButton>(_ => QuickRoomRestart.Begin(mode)));
+                buttons.Add(button);
+            }
 
             var parent = resume.GetParent();
             if (parent == null) return;
             var settingsPosition = settings.Position;
-            parent.AddChild(button);
+            var originalPositions = parent.GetChildren()
+                .OfType<NPauseMenuButton>()
+                .ToDictionary(button => button, button => button.Position);
+            foreach (var button in buttons) parent.AddChild(button);
 
             if (parent is Container)
             {
-                parent.MoveChild(button, Math.Min(resume.GetIndex() + 1, parent.GetChildCount() - 1));
+                int insertAt = resume.GetIndex() + 1;
+                for (int i = 0; i < buttons.Count; i++)
+                    parent.MoveChild(buttons[i], Math.Min(insertAt + i, parent.GetChildCount() - 1));
             }
-            else
+
+            float spacing = settingsPosition.Y - resume.Position.Y;
+            if (spacing < 4f) spacing = Math.Max(resume.Size.Y + 20f, 90f);
+            var state = new MenuButtonState
             {
-                float spacing = settingsPosition.Y - resume.Position.Y;
-                if (spacing < 4f) spacing = Math.Max(resume.Size.Y + 20f, 90f);
-                foreach (var child in parent.GetChildren().OfType<NPauseMenuButton>())
-                {
-                    if (child == resume || child == button) continue;
-                    if (child.Position.Y >= settingsPosition.Y - 1f)
-                        child.Position += new Vector2(0f, spacing);
-                }
-                button.Position = settingsPosition;
-            }
+                Menu = __instance,
+                Resume = resume,
+                Settings = settings,
+                Restart = buttons[0],
+                Encounter = buttons[1],
+                Shuffle = buttons[2],
+                Parent = parent,
+                OriginalPositions = originalPositions,
+                SettingsPosition = settingsPosition,
+                Spacing = spacing,
+                VisibleFocusMode = resume.FocusMode,
+            };
+            __instance.Connect(
+                CanvasItem.SignalName.VisibilityChanged,
+                Callable.From(() => RefreshButtons(state)));
+            RefreshButtons(state);
 
-            SetButtonText(button, "重打");
-            button.TooltipText = "从本关入口存档重新开始";
-            button.Visible = true;
-            button.Connect(
-                NClickableControl.SignalName.Released,
-                Callable.From<NButton>(_ => QuickRoomRestart.Begin()));
-
-            // Include the injected control in keyboard/controller traversal.
-            resume.FocusNeighborBottom = resume.GetPathTo(button);
-            resume.FocusNext = resume.GetPathTo(button);
-            button.FocusNeighborTop = button.GetPathTo(resume);
-            button.FocusPrevious = button.GetPathTo(resume);
-            button.FocusNeighborBottom = button.GetPathTo(settings);
-            button.FocusNext = button.GetPathTo(settings);
-            settings.FocusNeighborTop = settings.GetPathTo(button);
-            settings.FocusPrevious = settings.GetPathTo(button);
-
-            GD.Print($"{RetryMod.LogPrefix}quick restart button added to pause menu");
+            GD.Print($"{RetryMod.LogPrefix}quick restart buttons added to pause menu count=3");
         }
         catch (Exception ex)
         {
             GD.PrintErr($"{RetryMod.LogPrefix}pause quick restart button: {ex.Message}");
         }
+    }
+
+    private static void RefreshButtons(MenuButtonState state)
+    {
+        if (!GodotObject.IsInstanceValid(state.Menu)) return;
+
+        bool canRestart = QuickRoomRestart.CanRestart(out _);
+        bool canReroll = canRestart && QuickRoomRestart.CanRerollCombat;
+        SetVisibleAndFocusable(state.Restart, canRestart, state.VisibleFocusMode);
+        SetVisibleAndFocusable(state.Encounter, canReroll, state.VisibleFocusMode);
+        SetVisibleAndFocusable(state.Shuffle, canReroll, state.VisibleFocusMode);
+
+        var visibleButtons = new List<NPauseMenuButton>(3);
+        if (state.Restart.Visible) visibleButtons.Add(state.Restart);
+        if (state.Encounter.Visible) visibleButtons.Add(state.Encounter);
+        if (state.Shuffle.Visible) visibleButtons.Add(state.Shuffle);
+
+        if (state.Parent is not Container)
+        {
+            foreach (var (button, originalPosition) in state.OriginalPositions)
+            {
+                if (button == state.Resume) continue;
+                button.Position = originalPosition.Y >= state.SettingsPosition.Y - 1f
+                    ? originalPosition + new Vector2(0f, state.Spacing * visibleButtons.Count)
+                    : originalPosition;
+            }
+            for (int i = 0; i < visibleButtons.Count; i++)
+                visibleButtons[i].Position = state.SettingsPosition + new Vector2(0f, state.Spacing * i);
+        }
+
+        var focusChain = new List<NPauseMenuButton>(visibleButtons.Count + 2)
+        {
+            state.Resume,
+        };
+        focusChain.AddRange(visibleButtons);
+        focusChain.Add(state.Settings);
+        for (int i = 0; i < focusChain.Count - 1; i++)
+        {
+            var upper = focusChain[i];
+            var lower = focusChain[i + 1];
+            upper.FocusNeighborBottom = upper.GetPathTo(lower);
+            upper.FocusNext = upper.GetPathTo(lower);
+            lower.FocusNeighborTop = lower.GetPathTo(upper);
+            lower.FocusPrevious = lower.GetPathTo(upper);
+        }
+
+        GD.Print(
+            $"{RetryMod.LogPrefix}pause restart buttons refreshed " +
+            $"restart={canRestart} rerolls={canReroll}");
+    }
+
+    private static void SetVisibleAndFocusable(
+        NPauseMenuButton button,
+        bool visible,
+        Control.FocusModeEnum visibleFocusMode)
+    {
+        button.Visible = visible;
+        button.FocusMode = visible ? visibleFocusMode : Control.FocusModeEnum.None;
     }
 
     private static void SetButtonText(Node root, string text)

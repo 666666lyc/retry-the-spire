@@ -1,24 +1,50 @@
 # Retry the Spire
 
-Retry the current room or resume a *Slay the Spire 2* run from any visited map node—solo or multiplayer.
+Reroll a fight, retry the current room, or resume a *Slay the Spire 2* run from any visited map node—solo or multiplayer.
 
 **[Steam Workshop](https://steamcommunity.com/sharedfiles/filedetails/?id=3813193061)** · **[Latest release](https://github.com/666666lyc/retry-the-spire/releases/latest)** · **[Installation guide](INSTALL.md)**
 
-Current release: **v0.5.3**
+Current release: **v0.6.0**
 
 [English](#english) | [简体中文](#简体中文)
 
 > [!IMPORTANT]
 > Retry the Spire is a modified fork of [sts2mods/Retry](https://github.com/sts2mods/Retry). Do not enable both mods at the same time: they patch the same screens and run-loading paths.
 
+![Combat reroll controls](docs/assets/combat-rerolls.png)
+
 ## English
 
-Retry the Spire gives you two ways to try again without starting an entire run over:
+Retry the Spire gives you three ways to try again without starting an entire run over:
 
-- **Retry the current room** from the pause menu.
+- **Reroll the current combat** with a different encounter or draw order.
 - **Resume a past run** from a visited node in Run History, with the recorded run state restored.
+- **Retry the current room** from its native room-entry save.
 
-### Current-room retry
+### Reroll the current combat
+
+During combat, the pause menu provides two focused reroll options in addition to **Retry**:
+
+- **Reroll Encounter** replaces the current encounter with another encounter of the same tier from the current act, then restarts the fight.
+- **Reroll Draw Order** advances only the shuffle RNG before restarting, leaving monster AI, random targets, and reward RNG unchanged.
+
+![Reroll Encounter](docs/assets/reroll-encounter.gif)
+
+![Reroll Draw Order](docs/assets/reroll-draw-order.gif)
+
+Both options replace or reroll from the combat entrance rather than changing an already-running battlefield. They are hidden outside combat. In multiplayer, only the host can start them; every client receives the same transformed save.
+
+### Resume from Run History
+
+1. Open a run in **Run History** and select **View Acts**.
+2. Switch to the act you want, select a visited node, and confirm.
+3. Retry the run with its recorded seed, inventory, player state, and map progress.
+
+![View Acts in Run History](docs/assets/history-entry.png)
+
+![Select a visited node](docs/assets/node-selection.png)
+
+### Retry the current room
 
 #### Single-player
 
@@ -37,16 +63,6 @@ When every connected player uses v0.5.0 or newer, all players reload in place wh
 The host falls back to the game's native replacement lobby. Updated peers find and ready in that lobby automatically; unmodded players can rejoin manually without installing a dependency.
 
 ![Multiplayer replacement-lobby retry](docs/assets/multiplayer-fallback-retry.gif)
-
-### Resume from Run History
-
-1. Open a run in **Run History** and select **View Acts**.
-2. Switch to the act you want, select a visited node, and confirm.
-3. Retry the run with its recorded seed, inventory, player state, and map progress.
-
-![View Acts in Run History](docs/assets/history-entry.png)
-
-![Select a visited node](docs/assets/node-selection.png)
 
 ### What is restored
 
@@ -117,10 +133,34 @@ The original MIT license and copyright notice are preserved in [`LICENSE`](LICEN
 
 ## 简体中文
 
-Retry the Spire 提供两种重打方式，不必为了再试一次而放弃整局：
+Retry the Spire 提供三种重打方式，不必为了再试一次而放弃整局：
 
-- 在暂停菜单中**重打当前房间**。
+- 在战斗中**重掷当前遭遇或牌序**。
 - 从对局历史中选择已经到访的节点，**恢复过去的对局**。
+- 从房间入口存档**重打当前房间**。
+
+### 战斗中即时重掷
+
+战斗中，暂停菜单会在“重打”之外提供两个针对性入口：
+
+- **遭遇重掷**：随机替换为当前章节中同层级的另一场遭遇，然后重新开始战斗。
+- **牌序重掷**：仅推进洗牌随机数并重新开始战斗；怪物 AI、随机目标和奖励随机数保持不变。
+
+![遭遇重掷演示](docs/assets/reroll-encounter.gif)
+
+![牌序重掷演示](docs/assets/reroll-draw-order.gif)
+
+两项功能都会从战斗入口重新开始，而不是热替换已经开始的战场。非战斗房间不会显示这两个按钮；多人模式下仅房主可以发起，所有客户端会收到同一份变换后的存档。
+
+### 从对局历史重打
+
+1. 在**对局历史**中打开一局记录，点击 **View Acts（查看章节）**。
+2. 切换到需要重打的章节，选择已经到访的节点并确认。
+3. 使用记录中的种子、角色状态、物品与地图进度重新开始。
+
+![对局历史中的 View Acts 入口](docs/assets/history-entry.png)
+
+![选择已经到访的节点](docs/assets/node-selection.png)
 
 ### 当前房间重打
 
@@ -141,16 +181,6 @@ Retry the Spire 提供两种重打方式，不必为了再试一次而放弃整�
 房主会自动改用游戏原生的替换大厅。新版模组玩家会自动找到大厅并准备；未安装模组的玩家无需额外依赖，可以手动重新加入。
 
 ![多人替换大厅重打](docs/assets/multiplayer-fallback-retry.gif)
-
-### 从对局历史重打
-
-1. 在**对局历史**中打开一局记录，点击 **View Acts（查看章节）**。
-2. 切换到需要重打的章节，选择已经到访的节点并确认。
-3. 使用记录中的种子、角色状态、物品与地图进度重新开始。
-
-![对局历史中的 View Acts 入口](docs/assets/history-entry.png)
-
-![选择已经到访的节点](docs/assets/node-selection.png)
 
 ### 恢复内容
 
