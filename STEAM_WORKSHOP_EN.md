@@ -14,9 +14,13 @@ Retry the Spire can reroll the encounter or draw order in combat, or resume a pa
 
 Replace the fight with another complete encounter from the same act and combat tier, then restart from the combat entrance. Weak, regular, elite, and boss encounters remain in their own tiers.
 
+[img]https://images.steamusercontent.com/ugc/16964543852462690622/25986106770C7E297EC95A4FD8871AB5D0EC6277/[/img]
+
 [h3]Reroll Draw Order[/h3]
 
 Advance only the shuffle RNG to change the opening draw and later reshuffles. Monster AI, random targets, and reward RNG stay unchanged.
+
+[img]https://images.steamusercontent.com/ugc/14475840924573603768/90B50F186B3EF49542B96A1C0B4375AB77529842/[/img]
 
 Both controls appear only during combat. In multiplayer, only the host can use them, and every client loads the same transformed save.
 
