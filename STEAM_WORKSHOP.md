@@ -14,13 +14,13 @@ Retry the Spire 可以在战斗中重掷遭遇或牌序，也可以从历史记�
 
 随机替换为当前章节、相同战斗层级的另一场完整遭遇，然后从战斗入口重新开始。弱怪、普通怪、精英和 Boss 不会跨层级混合。
 
-[img]https://images.steamusercontent.com/ugc/16964543852462690622/25986106770C7E297EC95A4FD8871AB5D0EC6277/[/img]
+[img]https://images.steamusercontent.com/ugc/14491581482156062642/594F3A010997C5DB795B992D1850D86C4ADC26B5/[/img]
 
 [h3]牌序重掷[/h3]
 
 只推进洗牌随机数，改变初始牌序及后续洗牌顺序；怪物 AI、随机目标和奖励随机数保持不变。
 
-[img]https://images.steamusercontent.com/ugc/14475840924573603768/90B50F186B3EF49542B96A1C0B4375AB77529842/[/img]
+[img]https://images.steamusercontent.com/ugc/13332759611398916762/6EB95CE854F3BC8282D50357364514C782FB39C5/[/img]
 
 两个入口只在战斗中显示。多人模式下仅房主可以发起，所有客户端会加载同一份变换后的存档。
 
