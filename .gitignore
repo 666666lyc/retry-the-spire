@@ -13,6 +13,15 @@ RetryTheSpire-v*.zip
 .git-index-*
 .git-objects-*/
 
+# Local test evidence and imported attachments
+.codex-remote-attachments/
+test-artifacts/
+
+# Local game saves, backups, and replays
+*.save
+*.save.backup
+*.mcr
+
 # Editor
 *.user
 .vs/

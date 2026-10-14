@@ -55,7 +55,8 @@ public static class RunState_AddVisitedMapCoord_Patch
                 floor,
                 coord,
                 counters,
-                __instance.Players.Select(player => player.ToSerializable()).ToList());
+                __instance.Players.Select(player => player.ToSerializable()).ToList(),
+                __instance.Map);
         }
         catch (Exception ex)
         {

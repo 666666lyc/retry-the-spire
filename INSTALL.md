@@ -1,6 +1,6 @@
 # Installing Retry the Spire
 
-Current release: **v0.6.0**
+Current release: **v0.7.0**
 
 1. Disable or remove the original **Retry** mod. Do not enable both mods.
 2. Extract the release archive into the *Slay the Spire 2* `mods` directory.

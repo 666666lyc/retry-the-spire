@@ -233,17 +233,32 @@ internal static class MultiplayerRetryLauncher
             history.Seed);
         runState.ExtraFields.StartedWithNeow = true;
 
-        // Generate maps in historical order. Map RNG is shared, so later-act
-        // maps are only identical when every preceding act consumed its map
-        // generation stream first.
+        // Prefer the exact native maps captured at room entry. Old v4
+        // sidecars have no map blob, so they retain the deterministic
+        // regeneration fallback and exact historical path normalization.
         for (int i = 0; i <= actIndex; i++)
         {
             runState.CurrentActIndex = i;
-            var generated = runState.Acts[i].CreateMap(runState, replaceTreasureWithElites: false);
+            var generated = RngSnapshotStore.TryCreateSavedActMap(
+                target.SourceStartTime, target.Seed, i)
+                ?? runState.Acts[i].CreateMap(runState, replaceTreasureWithElites: false);
             if (i == actIndex) runState.Map = generated;
         }
         runState.CurrentActIndex = actIndex;
         runState.ActFloor = floorIndex;
+
+        if (!RngSnapshotStore.HasMapSnapshot(target.SourceStartTime, target.Seed, actIndex))
+        {
+            var currentEntries = target.MapPointHistorySoFar[actIndex];
+            var exactPath = pathThroughTarget.Select(coord => runState.Map!.GetAllMapPoints()
+                .Append(runState.Map.StartingMapPoint)
+                .FirstOrDefault(point => point.coord.row == coord.row && point.coord.col == coord.col))
+                .Where(point => point != null).Cast<MapPoint>().ToList();
+            int normalized = MapPathSearch.NormalizeHistoricalTypes(exactPath, currentEntries);
+            GD.PrintErr(
+                $"{RetryMod.LogPrefix}multiplayer warning: exact map snapshot unavailable; " +
+                $"normalized {normalized} visited node types");
+        }
 
         // Close() restored the real local id and removed the browser's fake
         // net service. Reinstall a no-save service only long enough for the

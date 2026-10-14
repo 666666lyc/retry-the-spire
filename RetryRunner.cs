@@ -33,6 +33,7 @@ namespace Retry;
 
 public static class RetryRunner
 {
+    public static event Action<RunState, RetryTarget>? RetryCompleted;
     // Entry from HistoryClickPatch — user clicked a node in the per-
     // run history list (no specific map coord). We open the act-map
     // viewer for that act with the target highlighted so the player
@@ -130,6 +131,22 @@ public static class RetryRunner
                 || SaveManager.Instance?.HasRunSave == true;
         }
         catch { return false; }
+    }
+
+    // Deterministic harness entry: performs the same native abandon path as
+    // the confirmation popup, but makes the check and launch contiguous so
+    // startup cloud-sync cannot surface a save between two separate calls.
+    public static void BeginForAutomatedTest(
+        RunHistory history,
+        RunHistoryPlayer player,
+        int actIndex,
+        int floorIndex,
+        MapCoord? targetCoord)
+    {
+        bool inProgress = RunManager.Instance?.IsInProgress == true;
+        if (inProgress || SaveManager.Instance?.HasRunSave == true)
+            PerformAbandon(writeHistory: true, inProgress: inProgress);
+        BeginInternal(history, player, actIndex, floorIndex, targetCoord);
     }
 
     // Tear down the current/saved run. When writeHistory is true we
@@ -303,6 +320,8 @@ public static class RetryRunner
         //     by one row and land us on the wrong node.
         RetryContext.IsRetrying = true;
         RetryContext.SkipNextNeowEntry = true;
+        RetryContext.SourceStartTime = target.SourceStartTime;
+        RetryContext.SourceSeed = target.Seed;
         try
         {
             // FromSerializable requires every act to have a non-null,
@@ -452,6 +471,8 @@ public static class RetryRunner
         {
             RetryContext.IsRetrying = false;
             RetryContext.SkipNextNeowEntry = false;
+            RetryContext.SourceStartTime = 0;
+            RetryContext.SourceSeed = null;
         }
     }
 
@@ -651,6 +672,18 @@ public static class RetryRunner
     // (preferred) and the greedy-walk fallback.
     private static async Task EnterAtPath(RunState runState, RetryTarget target, List<MapPoint> path, bool dfsExact)
     {
+        // When an old/corrupt sidecar has no map blob, keep every visited
+        // historical node exact even though unvisited branches came from the
+        // current generator. This is intentionally done for the whole path,
+        // not just the target room.
+        if (target.MapPointHistorySoFar.Count > target.TargetActIndex)
+        {
+            int normalized = MapPathSearch.NormalizeHistoricalTypes(
+                path, target.MapPointHistorySoFar[target.TargetActIndex]);
+            if (normalized > 0)
+                GD.PrintErr($"{RetryMod.LogPrefix}fallback map: normalized {normalized} visited node types");
+        }
+
         // Intermediate coords get marked visited — paints the map
         // path but doesn't fire rooms (we already injected the
         // historical inventory).
@@ -851,6 +884,9 @@ public static class RetryRunner
             DebugDump.DumpVisited(runState);
         }
         catch { /* informational only */ }
+
+        try { RetryCompleted?.Invoke(runState, target); }
+        catch (Exception ex) { GD.PrintErr($"{RetryMod.LogPrefix}retry completion observer: {ex.Message}"); }
     }
 
     // Walk RunHistory's nested list-of-acts to find the (actIndex,

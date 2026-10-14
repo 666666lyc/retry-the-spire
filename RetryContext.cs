@@ -12,6 +12,13 @@ public static class RetryContext
 {
     public static bool IsRetrying;
 
+    // While a historical retry is launching, GenerateMap uses these keys to
+    // ask the sidecar for the exact native SerializableActMap. Keeping this at
+    // the map-generation choke point avoids SetUpNewSingleplayer clearing a
+    // map queued too early.
+    public static long SourceStartTime;
+    public static string? SourceSeed;
+
     // One-shot: suppress the auto-EnterMapCoord on StartingMapPoint
     // that EnterAct(0) does when StartedWithNeow=true. Cleared by
     // RunManager_EnterMapCoord_Patch as soon as it fires once, so a
@@ -52,5 +59,7 @@ public static class RetryContext
         TargetExpectedRoomType = null;
         TargetCardChoices = null;
         TargetExpectedRelic = null;
+        SourceStartTime = 0;
+        SourceSeed = null;
     }
 }

@@ -43,6 +43,7 @@ namespace Retry;
 
 public static class NActMapBrowser
 {
+    public static event Action? ReadyForAutomation;
     public static bool Active { get; private set; }
     public static NRun? SpawnedNRun { get; private set; }
 
@@ -176,6 +177,9 @@ public static class NActMapBrowser
             catch (Exception ex)
             { GD.PrintErr($"{RetryMod.LogPrefix}browser hover-z: {ex.Message}"); }
             ((SceneTree)Engine.GetMainLoop()).Root.GuiReleaseFocus();
+            try { ReadyForAutomation?.Invoke(); }
+            catch (Exception ex)
+            { GD.PrintErr($"{RetryMod.LogPrefix}browser automation ready: {ex.Message}"); }
         }
         catch (Exception ex)
         {
@@ -473,7 +477,20 @@ public static class NActMapBrowser
         if (actIdx >= _history.Acts.Count) return (null, new());
         SetCurrentActIndex(actIdx);
         var act = _runState.Acts[actIdx];
-        var map = act.CreateMap(_runState, replaceTreasureWithElites: false);
+        var map = RngSnapshotStore.TryCreateSavedActMap(
+            _history.StartTime, _history.Seed, actIdx);
+        bool restoredExactMap = map != null;
+        if (map == null)
+        {
+            map = act.CreateMap(_runState, replaceTreasureWithElites: false);
+            GD.PrintErr(
+                $"{RetryMod.LogPrefix}browser warning: exact map snapshot unavailable for act={actIdx}; " +
+                "unvisited branches are regenerated");
+        }
+        else
+        {
+            GD.Print($"{RetryMod.LogPrefix}browser act {actIdx}: restored exact native map snapshot");
+        }
 
         var entries = _history.MapPointHistory[actIdx];
         var typeChain = new List<MapPointType>();
@@ -526,7 +543,15 @@ public static class NActMapBrowser
         }
         var visited = new List<MapCoord>();
         if (path != null)
+        {
+            if (!restoredExactMap)
+            {
+                int normalized = MapPathSearch.NormalizeHistoricalTypes(path, entries);
+                if (normalized > 0)
+                    GD.PrintErr($"{RetryMod.LogPrefix}browser fallback act {actIdx}: normalized {normalized} visited node types");
+            }
             foreach (var n in path) visited.Add(n.coord);
+        }
         return (map, visited);
     }
 
@@ -1399,27 +1424,48 @@ public static class NActMapBrowser
 
         var iconPath = MegaCrit.Sts2.Core.Helpers.ImageHelper.GetRoomIconPath(pointType, roomType, modelId);
         var outlinePath = MegaCrit.Sts2.Core.Helpers.ImageHelper.GetRoomIconOutlinePath(pointType, roomType, modelId);
+        var iconTexture = LoadRoomIconTexture(iconPath, pointType, roomType, outline: false);
+        var outlineTexture = LoadRoomIconTexture(outlinePath, pointType, roomType, outline: true);
 
         var iconRect = _roomIconField?.GetValue(topBar.RoomIcon) as TextureRect;
         var outlineRect = _roomIconOutlineField?.GetValue(topBar.RoomIcon) as TextureRect;
         if (iconRect != null)
         {
-            if (iconPath != null)
+            if (iconTexture != null)
             {
                 iconRect.Visible = true;
-                iconRect.Texture = MegaCrit.Sts2.Core.Assets.PreloadManager.Cache.GetCompressedTexture2D(iconPath);
+                iconRect.Texture = iconTexture;
             }
             else { iconRect.Visible = false; }
         }
         if (outlineRect != null)
         {
-            if (outlinePath != null)
+            if (outlineTexture != null)
             {
                 outlineRect.Visible = true;
-                outlineRect.Texture = MegaCrit.Sts2.Core.Assets.PreloadManager.Cache.GetCompressedTexture2D(outlinePath);
+                outlineRect.Texture = outlineTexture;
             }
             else { outlineRect.Visible = false; }
         }
+    }
+
+    private static Texture2D? LoadRoomIconTexture(
+        string? preferredPath,
+        MapPointType pointType,
+        MegaCrit.Sts2.Core.Rooms.RoomType roomType,
+        bool outline)
+    {
+        string? path = preferredPath;
+        if (path == null || !ResourceLoader.Exists(path))
+        {
+            path = outline
+                ? MegaCrit.Sts2.Core.Helpers.ImageHelper.GetRoomIconOutlinePath(
+                    pointType, roomType, modelId: null)
+                : MegaCrit.Sts2.Core.Helpers.ImageHelper.GetRoomIconPath(
+                    pointType, roomType, modelId: null);
+        }
+        if (path == null || !ResourceLoader.Exists(path)) return null;
+        return MegaCrit.Sts2.Core.Assets.PreloadManager.Cache.GetCompressedTexture2D(path);
     }
 
     private static void CommitRetry()

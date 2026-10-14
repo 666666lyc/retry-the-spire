@@ -28,12 +28,16 @@
 // greedy walk.
 using System.Collections.Generic;
 using System.Linq;
+using System.Reflection;
 using MegaCrit.Sts2.Core.Map;
+using MegaCrit.Sts2.Core.Runs.History;
 
 namespace Retry;
 
 public static class MapPathSearch
 {
+    private static readonly FieldInfo? PointTypeField = typeof(MapPoint).GetField(
+        "<PointType>k__BackingField", BindingFlags.Instance | BindingFlags.NonPublic);
     public sealed class BestEffortResult
     {
         public required List<MapPoint> Path;
@@ -240,4 +244,24 @@ public static class MapPathSearch
 
     private static bool SameCoord(MapCoord a, MapCoord b)
         => a.row == b.row && a.col == b.col;
+
+    // Old v4 histories have coordinates/player RNG but no full map snapshot.
+    // Their unvisited branches necessarily remain a best-effort regeneration;
+    // visited nodes, however, can still be made faithful to native history.
+    public static int NormalizeHistoricalTypes(
+        IReadOnlyList<MapPoint> path,
+        IReadOnlyList<MapPointHistoryEntry> history)
+    {
+        if (PointTypeField == null) return 0;
+        int changed = 0;
+        int count = System.Math.Min(path.Count, history.Count);
+        for (int i = 0; i < count; i++)
+        {
+            var expected = history[i].MapPointType;
+            if (path[i].PointType == expected) continue;
+            PointTypeField.SetValue(path[i], expected);
+            changed++;
+        }
+        return changed;
+    }
 }

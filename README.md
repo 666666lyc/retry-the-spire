@@ -4,7 +4,7 @@ Reroll a fight, retry the current room, or resume a *Slay the Spire 2* run from 
 
 **[Steam Workshop](https://steamcommunity.com/sharedfiles/filedetails/?id=3813193061)** · **[Latest release](https://github.com/666666lyc/retry-the-spire/releases/latest)** · **[Installation guide](INSTALL.md)**
 
-Current release: **v0.6.0**
+Current release: **v0.7.0**
 
 [English](#english) | [简体中文](#简体中文)
 
@@ -68,10 +68,12 @@ The host falls back to the game's native replacement lobby. Updated peers find a
 
 - Seed, character, ascension, deck, relics, potions, HP, gold, and play time.
 - Visited map path, current act and node, event history, and room queues.
-- Versioned room-entry player, map, and RNG snapshots when available.
+- Versioned room-entry player, native map, and RNG snapshots when available.
 - Original multiplayer participants under their recorded Steam IDs.
 - Separate single-player and multiplayer save slots.
 - Unmodified Standard history retries remain eligible to unlock the next ascension level in both single-player and multiplayer.
+
+Snapshot sidecars now use schema v5. Older v4 sidecars are migrated automatically. Native maps and exact historical coordinates prevent visited node types from drifting during history retries, while player, deck, relic, potion, and RNG state are restored from the matching room entrance. Deduplication, gzip compression, and bounded pruning keep the sidecar compact. If an encounter-specific room icon is unavailable, the history browser uses a generic room icon instead.
 
 Snapshots are stored beside the active profile saves, allowing Steam Cloud to carry exact retries across devices.
 
@@ -186,10 +188,12 @@ Retry the Spire 提供三种重打方式，不必为了再试一次而放弃整�
 
 - 种子、角色、进阶等级、牌组、遗物、药水、生命值、金币与游戏时间。
 - 已访问路线、当前章节和节点、事件历史与房间队列。
-- 可用的版本化房间入口玩家状态、地图和随机数快照。
+- 可用的版本化房间入口玩家状态、原生地图和随机数快照。
 - 原多人对局的参与者及其 Steam ID。
 - 相互独立的单人和多人存档槽。
 - 未修改的标准模式历史重打在单人和多人模式中均可正常解锁下一进阶等级。
+
+快照 sidecar 已升级到 schema v5，并会自动迁移旧版 v4 数据。历史重打会恢复原生地图与精确坐标，避免已访问节点在同一种子下发生普通怪、商店、精英等类型漂移；人物、牌组、遗物、药水和 RNG 状态也会从对应房间入口快照恢复。去重、gzip 压缩和有上限的清理策略用于控制存档大小。若特定遭遇的房间图标资源缺失，历史浏览器会回退到通用房间图标。
 
 快照与当前档案的存档放在一起，因此 Steam 云可以将精确重打数据同步到其他设备。
 
