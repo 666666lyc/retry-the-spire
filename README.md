@@ -119,9 +119,22 @@ mods/
 
 The project requires the .NET 9 SDK and a local copy of *Slay the Spire 2*.
 
-```bash
-./build.sh Release
+Windows (build only; add `-Install` to copy into the game):
+
+```powershell
+.\build.ps1 -GameDir 'C:\path\to\Slay the Spire 2'
 ```
+
+macOS / Linux (the existing default builds and installs):
+
+```bash
+./build.sh Release --game-dir '/path/to/Slay the Spire 2'
+# Build only:
+./build.sh Release --game-dir '/path/to/Slay the Spire 2' --no-install
+```
+
+Both scripts also accept `STS2_GAME_DIR`. See the [development guide](docs/DEVELOPMENT.md)
+for module responsibilities and the [regression checklist](docs/TESTING.md).
 
 The project references game assemblies from the local installation but does not redistribute them.
 
@@ -239,9 +252,22 @@ mods/
 
 本项目需要 .NET 9 SDK，以及本地安装的《杀戮尖塔 2》。
 
-```bash
-./build.sh Release
+Windows（默认只构建，加 `-Install` 才安装到游戏）：
+
+```powershell
+.\build.ps1 -GameDir 'C:\路径\Slay the Spire 2'
 ```
+
+macOS / Linux（保持原有默认行为：构建并安装）：
+
+```bash
+./build.sh Release --game-dir '/游戏路径/Slay the Spire 2'
+# 只构建：
+./build.sh Release --game-dir '/游戏路径/Slay the Spire 2' --no-install
+```
+
+两个脚本也都支持 `STS2_GAME_DIR` 环境变量。模块说明见[开发指南](docs/DEVELOPMENT.md)，
+验证方法见[回归检查](docs/TESTING.md)。
 
 本项目会引用本地游戏安装目录中的程序集，但不会重新分发这些文件。
 

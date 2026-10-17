@@ -1,0 +1,204 @@
+Retry.AutoTestConfig Constructor Void .ctor()
+Retry.AutoTestConfig Field Boolean AutoAbandonExisting
+Retry.AutoTestConfig Field Boolean BrowserTest
+Retry.AutoTestConfig Field Boolean CompareAfterRetry
+Retry.AutoTestConfig Field Boolean Enabled
+Retry.AutoTestConfig Field Boolean ExactSecondPass
+Retry.AutoTestConfig Field Boolean QuitWhenDone
+Retry.AutoTestConfig Field Boolean WriteHistoryWhenAutoAbandon
+Retry.AutoTestConfig Field Int32 Act
+Retry.AutoTestConfig Field Int32 Floor
+Retry.AutoTestConfig Field System.String BrowserClickFloors
+Retry.AutoTestConfig Field System.String RunFileBasename
+Retry.AutoTestConfig Field System.String ScreenshotPrefix
+Retry.AutoTestConfig Field System.String SequenceTargets
+Retry.AutoTestConfig Method Retry.AutoTestConfig LoadOrNull()
+Retry.AutoTestHarness Method Void Run(Retry.AutoTestConfig)
+Retry.BannerButton Field System.String BannerTexPath
+Retry.BannerButton Field System.String KreonBoldTooltipPath
+Retry.BannerButton Field System.String OutlineTexPath
+Retry.BannerButton Method Godot.Control Create(Retry.BannerButtonOptions)
+Retry.BannerButtonOptions Constructor Void .ctor()
+Retry.BannerButtonOptions Field Godot.Color Tint
+Retry.BannerButtonOptions Field Retry.BannerSide Side
+Retry.BannerButtonOptions Field Single Brightness
+Retry.BannerButtonOptions Field Single OffsetTop
+Retry.BannerButtonOptions Field System.Action OnClick
+Retry.BannerButtonOptions Field System.String Name
+Retry.BannerButtonOptions Field System.String Text
+Retry.BannerSide Field Int32 value__
+Retry.BannerSide Field Retry.BannerSide Left
+Retry.BannerSide Field Retry.BannerSide Right
+Retry.BrowserViaMainMenu Method System.Threading.Tasks.Task OpenAsync(MegaCrit.Sts2.Core.Runs.RunHistory, MegaCrit.Sts2.Core.Runs.RunHistoryPlayer)
+Retry.DebugDump Method Void DumpHistoryPath(MegaCrit.Sts2.Core.Runs.RunHistory, Int32, Int32)
+Retry.DebugDump Method Void DumpMap(MegaCrit.Sts2.Core.Runs.RunState)
+Retry.DebugDump Method Void DumpVisited(MegaCrit.Sts2.Core.Runs.RunState)
+Retry.DebugDump Method Void DumpWalk(System.Collections.Generic.List`1[MegaCrit.Sts2.Core.Map.MapPoint], System.Collections.Generic.List`1[System.String])
+Retry.EventListPatcher Method Void AlignToHistory(MegaCrit.Sts2.Core.Runs.RunState, Retry.RetryTarget)
+Retry.FidelityReport Method Void Emit(Inputs)
+Retry.FidelityReport+Inputs Constructor Void .ctor()
+Retry.FidelityReport+Inputs Field Boolean DfsPathFound
+Retry.FidelityReport+Inputs Field Boolean EventListAligned
+Retry.FidelityReport+Inputs Field Boolean RoomTypeForced
+Retry.FidelityReport+Inputs Field Boolean SnapshotApplied
+Retry.FidelityReport+Inputs Field MegaCrit.Sts2.Core.Map.MapCoord LandedCoord
+Retry.FidelityReport+Inputs Field MegaCrit.Sts2.Core.Runs.RunState RunState
+Retry.FidelityReport+Inputs Field Retry.RetryTarget Target
+Retry.FidelityReport+Inputs Field System.String Notes
+Retry.HistoryPrePopulator Method Void Apply(MegaCrit.Sts2.Core.Runs.RunState, Retry.RetryTarget)
+Retry.HudResync Method Void Apply(MegaCrit.Sts2.Core.Runs.RunState)
+Retry.InventoryInjector Method Void Apply(MegaCrit.Sts2.Core.Runs.RunState, Retry.PlayerStateSnapshot, Boolean)
+Retry.MapPathSearch Method BestEffortResult FindClosestPath(MegaCrit.Sts2.Core.Map.ActMap, System.Collections.Generic.IReadOnlyList`1[MegaCrit.Sts2.Core.Map.MapPointType], System.Collections.Generic.IReadOnlyDictionary`2[System.Int32,MegaCrit.Sts2.Core.Map.MapCoord], System.Collections.Generic.IReadOnlyDictionary`2[System.Int32,MegaCrit.Sts2.Core.Map.MapCoord])
+Retry.MapPathSearch Method Boolean TryBuildCoordinatePath(MegaCrit.Sts2.Core.Map.ActMap, System.Collections.Generic.IReadOnlyList`1[MegaCrit.Sts2.Core.Map.MapCoord], System.Collections.Generic.List`1[MegaCrit.Sts2.Core.Map.MapPoint] ByRef, System.String ByRef)
+Retry.MapPathSearch Method Int32 NormalizeHistoricalTypes(System.Collections.Generic.IReadOnlyList`1[MegaCrit.Sts2.Core.Map.MapPoint], System.Collections.Generic.IReadOnlyList`1[MegaCrit.Sts2.Core.Runs.History.MapPointHistoryEntry])
+Retry.MapPathSearch Method System.Collections.Generic.List`1[MegaCrit.Sts2.Core.Map.MapPoint] FindPath(MegaCrit.Sts2.Core.Map.ActMap, System.Collections.Generic.IReadOnlyList`1[MegaCrit.Sts2.Core.Map.MapPointType])
+Retry.MapPathSearch+BestEffortResult Constructor Void .ctor()
+Retry.MapPathSearch+BestEffortResult Field Boolean Complete
+Retry.MapPathSearch+BestEffortResult Field Int32 ExactCoordinateMatches
+Retry.MapPathSearch+BestEffortResult Field Int32 LegacyCoordinateMatches
+Retry.MapPathSearch+BestEffortResult Field Int32 TypeMismatches
+Retry.MapPathSearch+BestEffortResult Field System.Collections.Generic.List`1[MegaCrit.Sts2.Core.Map.MapPoint] Path
+Retry.NActMapBrowser Event System.Action ReadyForAutomation
+Retry.NActMapBrowser Field System.Nullable`1[System.UInt64] NetServiceNetIdOverride
+Retry.NActMapBrowser Method Boolean get_Active()
+Retry.NActMapBrowser Method MegaCrit.Sts2.Core.Nodes.NRun get_SpawnedNRun()
+Retry.NActMapBrowser Method System.Nullable`1[MegaCrit.Sts2.Core.Map.MapCoord] get_SelectedCoord()
+Retry.NActMapBrowser Method Void Close()
+Retry.NActMapBrowser Method Void HandleMapPointClick(MegaCrit.Sts2.Core.Map.MapCoord)
+Retry.NActMapBrowser Method Void Open(MegaCrit.Sts2.Core.Runs.RunHistory, MegaCrit.Sts2.Core.Runs.RunHistoryPlayer)
+Retry.NActMapBrowser Method Void add_ReadyForAutomation(System.Action)
+Retry.NActMapBrowser Method Void remove_ReadyForAutomation(System.Action)
+Retry.NActMapBrowser Property Boolean Active
+Retry.NActMapBrowser Property MegaCrit.Sts2.Core.Nodes.NRun SpawnedNRun
+Retry.NActMapBrowser Property System.Nullable`1[MegaCrit.Sts2.Core.Map.MapCoord] SelectedCoord
+Retry.OneButtonNotice Method Void Show(System.String, System.String, System.String, System.Action)
+Retry.PlayerStateFidelity Field Int32 value__
+Retry.PlayerStateFidelity Field Retry.PlayerStateFidelity Exact
+Retry.PlayerStateFidelity Field Retry.PlayerStateFidelity Reconstructed
+Retry.PlayerStateSnapshot Constructor Void .ctor()
+Retry.PlayerStateSnapshot Field Int32 CurrentHp
+Retry.PlayerStateSnapshot Field Int32 Gold
+Retry.PlayerStateSnapshot Field Int32 MaxHp
+Retry.PlayerStateSnapshot Field Int32 MaxPotionSlotCount
+Retry.PlayerStateSnapshot Field MegaCrit.Sts2.Core.Models.ModelId CharacterId
+Retry.PlayerStateSnapshot Field MegaCrit.Sts2.Core.Saves.Runs.SerializablePlayer ExactState
+Retry.PlayerStateSnapshot Field Retry.PlayerStateFidelity Fidelity
+Retry.PlayerStateSnapshot Field System.Collections.Generic.List`1[MegaCrit.Sts2.Core.Saves.Runs.SerializableCard] Deck
+Retry.PlayerStateSnapshot Field System.Collections.Generic.List`1[MegaCrit.Sts2.Core.Saves.Runs.SerializablePotion] Potions
+Retry.PlayerStateSnapshot Field System.Collections.Generic.List`1[MegaCrit.Sts2.Core.Saves.Runs.SerializableRelic] Relics
+Retry.PlayerStateSnapshot Field UInt64 NetId
+Retry.QuickRoomRestart Method Boolean CanRestart(Boolean ByRef)
+Retry.QuickRoomRestart Method Void Begin()
+Retry.RetryAbandonModal Method Void Show(System.String, System.String, System.Action`1[Retry.RetryAbandonModal+Choice])
+Retry.RetryAbandonModal+Choice Field Choice AbandonNoSave
+Retry.RetryAbandonModal+Choice Field Choice AbandonSave
+Retry.RetryAbandonModal+Choice Field Choice Cancel
+Retry.RetryAbandonModal+Choice Field Int32 value__
+Retry.RetryContext Field Boolean IsRetrying
+Retry.RetryContext Field Boolean SkipNextNeowEntry
+Retry.RetryContext Field Int64 SourceStartTime
+Retry.RetryContext Field MegaCrit.Sts2.Core.Models.ModelId TargetExpectedRelic
+Retry.RetryContext Field System.Collections.Generic.List`1[MegaCrit.Sts2.Core.Saves.Runs.SerializableCard] TargetCardChoices
+Retry.RetryContext Field System.Nullable`1[MegaCrit.Sts2.Core.Rooms.RoomType] TargetExpectedRoomType
+Retry.RetryContext Field System.String SourceSeed
+Retry.RetryContext Method Void ResetAll()
+Retry.RetryMod Field Boolean Enabled
+Retry.RetryMod Field System.String LogPrefix
+Retry.RetryMod Field System.String Version
+Retry.RetryMod Method Void Initialize()
+Retry.RetryRunner Event System.Action`2[MegaCrit.Sts2.Core.Runs.RunState,Retry.RetryTarget] RetryCompleted
+Retry.RetryRunner Method Boolean NeedsAbandonPrompt()
+Retry.RetryRunner Method Void Begin(MegaCrit.Sts2.Core.Runs.RunHistory, MegaCrit.Sts2.Core.Runs.RunHistoryPlayer, Int32, Int32, System.Nullable`1[MegaCrit.Sts2.Core.Map.MapCoord])
+Retry.RetryRunner Method Void BeginForAutomatedTest(MegaCrit.Sts2.Core.Runs.RunHistory, MegaCrit.Sts2.Core.Runs.RunHistoryPlayer, Int32, Int32, System.Nullable`1[MegaCrit.Sts2.Core.Map.MapCoord])
+Retry.RetryRunner Method Void OnHistoryNodeClicked(MegaCrit.Sts2.Core.Runs.RunHistory, MegaCrit.Sts2.Core.Runs.History.MapPointHistoryEntry, Int32, MegaCrit.Sts2.Core.Runs.RunHistoryPlayer)
+Retry.RetryRunner Method Void PerformAbandon(Boolean, Boolean)
+Retry.RetryRunner Method Void PerformMultiplayerAbandon(Boolean, UInt64)
+Retry.RetryRunner Method Void add_RetryCompleted(System.Action`2[MegaCrit.Sts2.Core.Runs.RunState,Retry.RetryTarget])
+Retry.RetryRunner Method Void remove_RetryCompleted(System.Action`2[MegaCrit.Sts2.Core.Runs.RunState,Retry.RetryTarget])
+Retry.RetryTarget Constructor Void .ctor()
+Retry.RetryTarget Field Int32 Ascension
+Retry.RetryTarget Field Int32 OriginalTotalFloors
+Retry.RetryTarget Field Int32 TargetActIndex
+Retry.RetryTarget Field Int32 TargetFloorIndex
+Retry.RetryTarget Field Int64 SourceStartTime
+Retry.RetryTarget Field MegaCrit.Sts2.Core.Runs.GameMode GameMode
+Retry.RetryTarget Field Retry.PlayerStateSnapshot Player
+Retry.RetryTarget Field Single OriginalRunTime
+Retry.RetryTarget Field System.Collections.Generic.List`1[MegaCrit.Sts2.Core.Models.ModelId] ActIds
+Retry.RetryTarget Field System.Collections.Generic.List`1[MegaCrit.Sts2.Core.Saves.Runs.SerializableModifier] Modifiers
+Retry.RetryTarget Field System.Collections.Generic.List`1[Retry.PlayerStateSnapshot] Players
+Retry.RetryTarget Field System.Collections.Generic.List`1[System.Collections.Generic.List`1[MegaCrit.Sts2.Core.Runs.History.MapPointHistoryEntry]] MapPointHistorySoFar
+Retry.RetryTarget Field System.String Seed
+Retry.RngSnapshotStore Method Boolean HasMapSnapshot(Int64, System.String, Int32)
+Retry.RngSnapshotStore Method Boolean HasSnapshot(Int64, System.String, Int32, Int32)
+Retry.RngSnapshotStore Method Boolean QueueSavedMapForGeneration(Int64, System.String, Int32)
+Retry.RngSnapshotStore Method Boolean TryApplyLive(MegaCrit.Sts2.Core.Runs.RunRngSet, Int64, System.String, Int32, Int32)
+Retry.RngSnapshotStore Method Boolean TryGetActMap(Int64, System.String, Int32, MegaCrit.Sts2.Core.Saves.Runs.SerializableActMap ByRef)
+Retry.RngSnapshotStore Method Int32 GetEncodedSizeForDiagnostics()
+Retry.RngSnapshotStore Method Int64 GetCurrentRunStartTime()
+Retry.RngSnapshotStore Method MegaCrit.Sts2.Core.Map.ActMap TryCreateSavedActMap(Int64, System.String, Int32)
+Retry.RngSnapshotStore Method MegaCrit.Sts2.Core.Saves.Runs.SerializablePlayer TryGetPlayerSnapshot(Int64, System.String, Int32, Int32, UInt64)
+Retry.RngSnapshotStore Method System.Nullable`1[MegaCrit.Sts2.Core.Map.MapCoord] TryGetCoord(Int64, System.String, Int32, Int32, Boolean)
+Retry.RngSnapshotStore Method System.Nullable`1[MegaCrit.Sts2.Core.Map.MapCoord] TryGetExactCoord(Int64, System.String, Int32, Int32)
+Retry.RngSnapshotStore Method System.Nullable`1[MegaCrit.Sts2.Core.Map.MapCoord] TryGetLegacyCoord(System.String, Int32, Int32)
+Retry.RngSnapshotStore Method System.String Fingerprint(MegaCrit.Sts2.Core.Map.ActMap)
+Retry.RngSnapshotStore Method System.String Fingerprint(MegaCrit.Sts2.Core.Saves.Runs.SerializablePlayer)
+Retry.RngSnapshotStore Method Void Capture(Int64, System.String, Int32, Int32, MegaCrit.Sts2.Core.Map.MapCoord, System.Collections.Generic.Dictionary`2[MegaCrit.Sts2.Core.Entities.Rngs.RunRngType,System.Int32], System.Collections.Generic.IReadOnlyList`1[MegaCrit.Sts2.Core.Saves.Runs.SerializablePlayer], MegaCrit.Sts2.Core.Map.ActMap)
+Retry.RngSnapshotStore Method Void CaptureCoordinates(Int64, System.String, Int32, System.Collections.Generic.IReadOnlyList`1[MegaCrit.Sts2.Core.Map.MapCoord])
+Retry.RngSnapshotStore Method Void CopyExactCoordinates(Int64, Int64, System.String, Int32, Int32)
+Retry.RoomQueueSimulator Method Void SimulatePriorRooms(MegaCrit.Sts2.Core.Runs.RunState, Retry.RetryTarget)
+Retry.RunTimeOffset Method Void Apply(Retry.RetryTarget)
+Retry.StateReconstructor Method Retry.PlayerStateSnapshot ReconstructAtTarget(MegaCrit.Sts2.Core.Runs.RunHistory, Int32, Int32, MegaCrit.Sts2.Core.Runs.RunHistoryPlayer)
+Retry.VisitedEventSeeder Method Void SeedCompletedActs(MegaCrit.Sts2.Core.Runs.RunState, Retry.RetryTarget)
+type Retry.AutoTestConfig
+type Retry.AutoTestHarness
+type Retry.BannerButton
+type Retry.BannerButtonOptions
+type Retry.BannerSide
+type Retry.BrowserViaMainMenu
+type Retry.CardFactory_CreateForReward_Patch
+type Retry.DebugDump
+type Retry.EventListPatcher
+type Retry.FidelityReport
+type Retry.FidelityReport+Inputs
+type Retry.HistoryPrePopulator
+type Retry.HudResync
+type Retry.InventoryInjector
+type Retry.MapPathSearch
+type Retry.MapPathSearch+BestEffortResult
+type Retry.NActMapBrowser
+type Retry.NGameOverScreen_Ready_Patch
+type Retry.NGame_ReturnToMainMenu_Patch
+type Retry.NMainMenu_Ready_Patch
+type Retry.NMapPointHistoryEntry_Ready_Patch
+type Retry.NMapScreen_OnMapPointSelectedLocally_Patch
+type Retry.NNormalMapPoint_Process_Patch
+type Retry.NPauseMenu_QuickRestart_Patch
+type Retry.NPotionHolder_AddPotion_Patch
+type Retry.NPotionHolder_DiscardPotion_Patch
+type Retry.NRelicInventory_Add_Patch
+type Retry.NRunHistory_Ready_Patch
+type Retry.NRunTimer_ToggleTimer_Patch
+type Retry.NRun_Instance_Patch
+type Retry.NTopBarPauseButton_OnRelease_Patch
+type Retry.NetSingleplayerGameService_NetId_Patch
+type Retry.OneButtonNotice
+type Retry.PlayerStateFidelity
+type Retry.PlayerStateSnapshot
+type Retry.QuickRoomRestart
+type Retry.RelicGrabBag_PullFromFront_Patch
+type Retry.RetryAbandonModal
+type Retry.RetryAbandonModal+Choice
+type Retry.RetryContext
+type Retry.RetryMod
+type Retry.RetryRunner
+type Retry.RetryTarget
+type Retry.RngSnapshotStore
+type Retry.RoomQueueSimulator
+type Retry.RunManager_EnterMapCoord_Patch
+type Retry.RunManager_GenerateMap_SavedSnapshot_Patch
+type Retry.RunManager_RollRoomTypeFor_Patch
+type Retry.RunState_AddVisitedMapCoord_Patch
+type Retry.RunTimeOffset
+type Retry.StateReconstructor
+type Retry.VisitedEventSeeder

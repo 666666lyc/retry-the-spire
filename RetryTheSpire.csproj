@@ -8,6 +8,8 @@
     <Version>0.7.0</Version>
     <PackageLicenseExpression>MIT</PackageLicenseExpression>
     <Nullable>enable</Nullable>
+    <EnableDefaultCompileItems>false</EnableDefaultCompileItems>
+    <STS2GameDir Condition="'$(STS2GameDir)' == ''">$(STS2_GAME_DIR)</STS2GameDir>
     <LangVersion>12.0</LangVersion>
     <Deterministic>true</Deterministic>
     <ContinuousIntegrationBuild>true</ContinuousIntegrationBuild>
@@ -15,16 +17,15 @@
     <IncludeSourceRevisionInInformationalVersion>false</IncludeSourceRevisionInInformationalVersion>
 
     <STS2GameDir Condition="'$(STS2GameDir)' == '' and $([System.Runtime.InteropServices.RuntimeInformation]::IsOSPlatform($([System.Runtime.InteropServices.OSPlatform]::OSX)))">$(HOME)/Library/Application Support/Steam/steamapps/common/Slay the Spire 2</STS2GameDir>
-    <STS2GameDir Condition="'$(STS2GameDir)' == ''">D:\SteamLibrary\steamapps\common\Slay the Spire 2</STS2GameDir>
+    <STS2GameDir Condition="'$(STS2GameDir)' == '' and '$(OS)' == 'Windows_NT'">$(MSBuildProgramFiles32)/Steam/steamapps/common/Slay the Spire 2</STS2GameDir>
+    <STS2GameDir Condition="'$(STS2GameDir)' == ''">$(HOME)/.local/share/Steam/steamapps/common/Slay the Spire 2</STS2GameDir>
     <STS2GameDataDir Condition="'$(STS2GameDataDir)' == '' and '$(OS)' == 'Windows_NT'">$(STS2GameDir)/data_sts2_windows_x86_64</STS2GameDataDir>
     <STS2GameDataDir Condition="'$(STS2GameDataDir)' == '' and $([System.Runtime.InteropServices.RuntimeInformation]::IsOSPlatform($([System.Runtime.InteropServices.OSPlatform]::OSX)))">$(STS2GameDir)/SlayTheSpire2.app/Contents/Resources/data_sts2_macos_arm64</STS2GameDataDir>
     <STS2GameDataDir Condition="'$(STS2GameDataDir)' == '' and '$(OS)' != 'Windows_NT' and !$([System.Runtime.InteropServices.RuntimeInformation]::IsOSPlatform($([System.Runtime.InteropServices.OSPlatform]::OSX)))">$(STS2GameDir)/data_sts2_linuxbsd_x86_64</STS2GameDataDir>
   </PropertyGroup>
 
   <ItemGroup>
-    <!-- Distribution tooling is a separate project and must not be compiled
-         into the mod assembly by the SDK's recursive default glob. -->
-    <Compile Remove="dist\**\*.cs" />
+    <Compile Include="src/**/*.cs" />
 
     <Reference Include="sts2">
       <HintPath>$(STS2GameDataDir)/sts2.dll</HintPath>
@@ -43,4 +44,8 @@
       <Private>false</Private>
     </Reference>
   </ItemGroup>
+  <Target Name="ValidateGameAssemblies" BeforeTargets="ResolveReferences">
+    <ItemGroup><_RequiredGameDll Include="sts2.dll;GodotSharp.dll;0Harmony.dll;Steamworks.NET.dll" /></ItemGroup>
+    <Error Condition="!Exists('$(STS2GameDataDir)/%(_RequiredGameDll.Identity)')" Text="Missing game assembly $(STS2GameDataDir)/%(_RequiredGameDll.Identity). Set STS2_GAME_DIR or pass -p:STS2GameDir=..." />
+  </Target>
 </Project>
