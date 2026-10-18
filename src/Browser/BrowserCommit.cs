@@ -112,8 +112,8 @@ internal sealed class BrowserCommit
             _session.Close();
             tree.CreateTimer(0.05).Connect("timeout", Callable.From(() =>
             {
-                string title = isMultiplayer ? "Abandon saved multiplayer run?" : "Abandon saved run?";
-                string body = isMultiplayer ? "Starting this retry will overwrite your existing multiplayer saved run. Your single-player save is not affected." : "Starting this retry will overwrite your existing saved run.";
+                string title = isMultiplayer ? HistoryRetryText.AbandonSavedMultiplayerRunTitle : HistoryRetryText.AbandonSavedRunTitle;
+                string body = isMultiplayer ? HistoryRetryText.BrowserOverwritesSavedMultiplayerRunBody : HistoryRetryText.BrowserOverwritesSavedRunBody;
                 GD.Print($"{RetryMod.LogPrefix}browser save confirmation: showing mode={(isMultiplayer ? "multiplayer" : "singleplayer")}");
                 RetryAbandonModal.Show(title: title, body: body, onChoice: c =>
                 {

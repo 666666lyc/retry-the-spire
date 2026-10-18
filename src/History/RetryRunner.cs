@@ -67,8 +67,8 @@ public static class RetryRunner
             bool hasSave = SaveManager.Instance?.HasRunSave == true;
             if (inProgress || hasSave)
             {
-                string title = inProgress ? "Abandon current run?" : "Abandon saved run?";
-                string body = inProgress ? "Starting a retry will end your in-progress run." : "Starting a retry will overwrite your existing saved run.";
+                string title = inProgress ? HistoryRetryText.AbandonCurrentRunTitle : HistoryRetryText.AbandonSavedRunTitle;
+                string body = inProgress ? HistoryRetryText.RetryEndsCurrentRunBody : HistoryRetryText.RetryOverwritesSavedRunBody;
                 RetryAbandonModal.Show(title, body, choice =>
                 {
                     switch (choice)

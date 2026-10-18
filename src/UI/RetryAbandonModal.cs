@@ -172,7 +172,9 @@ public static class RetryAbandonModal
         // button's own height plus a small gap.
         dup.Name = "AbandonNoSaveButton";
         dup.IsYes = true;
-        dup.SetText("Abandon (no save)");
+        string noSaveText = HistoryRetryText.AbandonWithoutHistory;
+        string confirmText = HistoryRetryText.ClickAgainToConfirm;
+        dup.SetText(noSaveText);
         float buttonH = src.Size.Y > 0 ? src.Size.Y : 70f;
         dup.Position = src.Position + new Vector2(0f, -(buttonH + 20f));
         dup.Visible = true;
@@ -182,7 +184,7 @@ public static class RetryAbandonModal
             if (!GodotObject.IsInstanceValid(dup))
                 return;
             armed = false;
-            dup.SetText("Abandon (no save)");
+            dup.SetText(noSaveText);
         }
 
         dup.Connect(NClickableControl.SignalName.Released, Callable.From<NButton>(_ =>
@@ -190,7 +192,7 @@ public static class RetryAbandonModal
             if (!armed)
             {
                 armed = true;
-                dup.SetText("Click again to confirm");
+                dup.SetText(confirmText);
                 var tt = dup.GetTree()?.CreateTimer(3.0);
                 tt?.Connect("timeout", Callable.From(Revert));
             }

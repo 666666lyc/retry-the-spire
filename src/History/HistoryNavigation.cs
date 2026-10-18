@@ -423,14 +423,15 @@ internal static class HistoryNavigation
         catch (Exception ex)
         {
             GD.PrintErr($"{RetryMod.LogPrefix}EnterMapCoord: {ex.Message}\n{ex.StackTrace}");
+            RetryContext.TargetCardChoices = null;
+            RetryContext.TargetExpectedRelic = null;
+            return;
         }
         finally
         {
             RetryContext.TargetExpectedRoomType = null;
-        // Don't clear TargetCardChoices here — it's consumed
-        // post-combat by CardReward.Populate, which fires after
-        // we've already returned from EnterMapCoord. The patch
-        // clears it itself on first fire.
+            // On success, retain reward overrides until the post-combat
+            // reward flow consumes them. Failed entry clears them above.
         }
 
         // EnterMapCoord has now built the room AND the in-run HUD

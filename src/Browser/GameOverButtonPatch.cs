@@ -11,6 +11,7 @@ using System;
 using System.Reflection;
 using Godot;
 using HarmonyLib;
+using MegaCrit.Sts2.Core.Combat;
 using MegaCrit.Sts2.Core.Nodes.Screens.GameOverScreen;
 using MegaCrit.Sts2.Core.Runs;
 
@@ -41,7 +42,7 @@ public static class NGameOverScreen_Ready_Patch
     private static void AddBanner(NGameOverScreen screen)
     {
         var captured = screen;
-        var root = BannerButton.Create(new BannerButtonOptions { Name = ButtonName, Text = "View Acts", // Left side so it doesn't fight the right-anchored button
+        var root = BannerButton.Create(new BannerButtonOptions { Name = ButtonName, Text = HistoryRetryText.ViewActs, // Left side so it doesn't fight the right-anchored button
  // stack (Continue / View Run / Main Menu / Leaderboard).
         Side = BannerSide.Left, // Gold-ish — matches the "achievement" tone of a finished
  // run rather than the cool blue of the in-menu browser.
@@ -93,11 +94,16 @@ public static class NGameOverScreen_Ready_Patch
             // when the user confirms a retry from the browser.
             try
             {
-                RunManager.Instance?.CleanUp(graceful: false);
+                // Non-graceful run cleanup leaves CombatManager's old state
+                // installed. Reset combat first so the next historical fight
+                // can start, while retaining immediate network teardown.
+                CombatManager.Instance.Reset(graceful: true);
+                RunManager.Instance.CleanUp(graceful: false);
             }
             catch (Exception ex)
             {
-                GD.PrintErr($"{RetryMod.LogPrefix}game over banner CleanUp: {ex.Message}");
+                GD.PrintErr($"{RetryMod.LogPrefix}game over banner combat/run cleanup failed: {ex}");
+                return;
             }
 
             try

@@ -53,7 +53,7 @@ public static class NRunHistory_Ready_Patch
     private static void AddBannerButton(NRunHistory rh)
     {
         var captured = rh;
-        var root = BannerButton.Create(new BannerButtonOptions { Name = ButtonName, Text = "View Acts", Side = BannerSide.Right, Tint = new Color(0.20f, 0.40f, 0.78f, 1f), Brightness = 2.1f, OffsetTop = 280, OnClick = () => OpenBrowser(captured), });
+        var root = BannerButton.Create(new BannerButtonOptions { Name = ButtonName, Text = HistoryRetryText.ViewActs, Side = BannerSide.Right, Tint = new Color(0.20f, 0.40f, 0.78f, 1f), Brightness = 2.1f, OffsetTop = 280, OnClick = () => OpenBrowser(captured), });
         rh.AddChild(root);
         ScheduleAlign(root, rh, 0);
     }
@@ -146,7 +146,7 @@ public static class NRunHistory_Ready_Patch
             // NRunHistory submenu state.
             if (RunManager.Instance?.IsInProgress == true)
             {
-                RetryAbandonModal.Show(title: "Abandon current run?", body: "Viewing acts of another run requires ending your in-progress run.", onChoice: c =>
+                RetryAbandonModal.Show(title: HistoryRetryText.AbandonCurrentRunTitle, body: HistoryRetryText.ViewingOtherActsBody, onChoice: c =>
                 {
                     if (c == RetryAbandonModal.Choice.Cancel)
                         return;

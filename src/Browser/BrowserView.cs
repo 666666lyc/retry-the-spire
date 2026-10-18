@@ -426,7 +426,7 @@ internal sealed class BrowserView
             {
                 // Fallback to our own styled button if extraction failed.
                 GD.PrintErr($"{RetryMod.LogPrefix}browser: confirm extract failed, using fallback");
-                _session._confirmButton = MakeBannerButton("CONFIRM", new Color(0.78f, 0.16f, 0.10f), new Color(1f, 0.30f, 0.18f));
+                _session._confirmButton = MakeBannerButton(HistoryRetryText.Confirm, new Color(0.78f, 0.16f, 0.10f), new Color(1f, 0.30f, 0.18f));
                 _session._confirmButton.Name = "RetryTheSpireConfirmBtn";
                 _session._confirmButton.SetAnchorsAndOffsetsPreset(Control.LayoutPreset.BottomRight);
                 _session._confirmButton.OffsetLeft = -260;
