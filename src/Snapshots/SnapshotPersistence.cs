@@ -19,6 +19,7 @@ internal static class SnapshotPersistence
     internal static string? _cachePath;
     internal static bool _loadedFromBackup;
     internal static byte[]? _lastGoodPayload;
+    private static bool _loadFailed;
     internal static bool TryGetCloudStore(out ISaveStore store, out string path)
     {
         store = null !;
@@ -82,6 +83,7 @@ internal static class SnapshotPersistence
             GD.PrintErr($"{RetryMod.LogPrefix}snapshot load: {ex.Message}; using reconstructed history state");
             _cache = new SnapshotData();
             SnapshotIndex.RebuildHashes();
+            _loadFailed = true;
         }
 
         if (migrated)
@@ -93,7 +95,7 @@ internal static class SnapshotPersistence
 
     internal static void TrySave()
     {
-        if (_cache == null || !TryGetCloudStore(out var store, out var path))
+        if (_loadFailed || _cache == null || !TryGetCloudStore(out var store, out var path))
             return;
         ISaveStore localStore = store is CloudSaveStore cloud ? cloud.LocalStore : store;
         string temp = path + ".tmp.backup";
@@ -168,5 +170,6 @@ internal static class SnapshotPersistence
         _cachePath = path;
         _cache = new SnapshotData();
         _loadedFromBackup = false;
+        _loadFailed = false;
     }
 }

@@ -11,6 +11,7 @@ using MegaCrit.Sts2.Core.Entities.Rngs;
 using MegaCrit.Sts2.Core.Map;
 using MegaCrit.Sts2.Core.Runs;
 using MegaCrit.Sts2.Core.Saves.Runs;
+using MegaCrit.Sts2.Core.Saves;
 
 namespace Retry;
 
@@ -43,6 +44,18 @@ public static class RngSnapshotStore
                     GD.PrintErr($"{RetryMod.LogPrefix}snapshot player serialize: {ex.Message}");
                 }
             }
+        }
+
+        // Capture before the room consumes any RNG. Do not attach a preview or
+        // unrelated active run to a caller-supplied snapshot identity.
+        var live = StateAccessor.GetState(RunManager.Instance);
+        if (live?.Rng.StringSeed == seed && live.CurrentActIndex == actIndex
+            && (live.MapPointHistory.Count > actIndex ? live.MapPointHistory[actIndex].Count : 0) == floor
+            && live.VisitedMapCoords.Count > 0 && live.VisitedMapCoords[^1].row == coord.row && live.VisitedMapCoords[^1].col == coord.col)
+        {
+            var native = RunManager.Instance.ToSave(null);
+            native.StartTime = startTime;
+            room.PlayerBlobIds.Add(SnapshotIndex.AddPlayerBlob(NativeRunSnapshot.Encode(native)));
         }
 
         map ??= TryGetLiveMap(actIndex);
@@ -100,7 +113,15 @@ public static class RngSnapshotStore
             room.Row = source.Row;
             room.Col = source.Col;
             room.Counters = new Dictionary<RunRngType, int>(source.Counters);
-            room.PlayerBlobIds = new List<int>(source.PlayerBlobIds);
+            room.PlayerBlobIds = source.PlayerBlobIds.Select(id =>
+            {
+                var blob = SnapshotPersistence._cache!.Players[id];
+                if (!NativeRunSnapshot.IsRun(blob))
+                    return id;
+                var native = NativeRunSnapshot.Decode(blob);
+                native.StartTime = destinationStartTime;
+                return SnapshotIndex.AddPlayerBlob(NativeRunSnapshot.Encode(native));
+            }).ToList();
             changed = true;
         }
 
@@ -135,6 +156,8 @@ public static class RngSnapshotStore
         foreach (int id in room.PlayerBlobIds)
         {
             if (id < 0 || id >= SnapshotPersistence._cache.Players.Count)
+                continue;
+            if (NativeRunSnapshot.IsRun(SnapshotPersistence._cache.Players[id]))
                 continue;
             try
             {
@@ -172,7 +195,7 @@ public static class RngSnapshotStore
         }
     }
 
-    public static ActMap? TryCreateSavedActMap(long startTime, string seed, int actIndex) => TryGetActMap(startTime, seed, actIndex, out var map) && map != null ? new SavedActMap(map) : null;
+    public static ActMap? TryCreateSavedActMap(long startTime, string seed, int actIndex) => TryGetActMap(startTime, seed, actIndex, out var map) && map != null ? GameCompatibility.RestoreMap(map, StateAccessor.GetState(RunManager.Instance)) : null;
     public static bool QueueSavedMapForGeneration(long startTime, string seed, int actIndex)
     {
         if (!TryGetActMap(startTime, seed, actIndex, out var map) || map == null)
@@ -190,12 +213,12 @@ public static class RngSnapshotStore
         var room = SnapshotIndex.FindRoom(startTime, seed, actIndex, floor);
         if (room == null)
             return false;
-        var save = new SerializableRunRngSet
-        {
-            Seed = seed
-        };
-        foreach (var kv in room.Counters)
-            save.Counters[kv.Key] = kv.Value;
+        var native = NativeRunSnapshot.Find(startTime, seed, actIndex, floor);
+        // A legacy counter is not sufficient to reconstruct the new RNG's
+        // four state words. Never load all-zero state or claim exact fidelity.
+        if (native == null)
+            return false;
+        var save = native.SerializableRng;
         try
         {
             liveRng.LoadFromSerializable(save);

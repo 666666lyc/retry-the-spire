@@ -34,6 +34,13 @@ internal static class RestartProtocol_InitialInfoPatch
     static void Postfix(JoinFlow __instance, InitialGameInfoMessage message) => MultiplayerRestartCoordinator.OnInitialGameInfo(__instance, message);
 }
 
+[HarmonyPatch(typeof(NetClientGameService), nameof(NetClientGameService.HandshakeSucceeded))]
+internal static class RestartProtocol_HandshakePatch
+{
+    static void Postfix(NetClientGameService __instance, ulong peerId, PeerVersionInfo versionInfo) =>
+        RestartCapabilities.RecordHostVersion(__instance, peerId, versionInfo);
+}
+
 [HarmonyPatch(typeof(RunManager), nameof(RunManager.Launch))]
 internal static class RestartProtocol_RunLaunchPatch
 {

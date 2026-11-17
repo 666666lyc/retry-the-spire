@@ -1,4 +1,5 @@
 using System.Collections.Generic;
+using System;
 using System.Linq;
 using Godot;
 using MegaCrit.Sts2.Core.Map;
@@ -33,6 +34,15 @@ internal sealed class BrowserCommit
 
         if (floor < 0)
             return;
+        try
+        {
+            NativeRunSnapshot.ValidateForRestore(_session._history.StartTime, _session._history.Seed, _session._currentAct, floor);
+        }
+        catch (Exception ex)
+        {
+            OneButtonNotice.Show("重打 / Retry", ex.Message, "OK", () => { });
+            return;
+        }
         // Capture before any tear-down so the closure has stable args.
         var history = _session._history;
         var player = _session._player;

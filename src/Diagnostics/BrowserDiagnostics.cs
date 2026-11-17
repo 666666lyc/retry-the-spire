@@ -252,6 +252,6 @@ internal static class NMapPoint_OnFocus_Diag
         var runState = ms != null ? typeof(NMapScreen).GetField("_runState", System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic)?.GetValue(ms) : null;
         var rs = runState as MegaCrit.Sts2.Core.Runs.RunState;
         var entryFor = rs?.GetHistoryEntryFor(new MegaCrit.Sts2.Core.Runs.MapLocation(__instance.Point.coord, rs.CurrentActIndex));
-        GD.Print($"{RetryMod.LogPrefix}DIAG OnFocus coord=({__instance.Point.coord.row},{__instance.Point.coord.col}) state={__instance.State} curCoord={rs?.MapLocation.coord} historyEntry={(entryFor != null ? "found" : "null")} usingController={MegaCrit.Sts2.Core.Nodes.CommonUi.NControllerManager.Instance.IsUsingController}");
+        GD.Print($"{RetryMod.LogPrefix}DIAG OnFocus coord=({__instance.Point.coord.row},{__instance.Point.coord.col}) state={__instance.State} curCoord={rs?.MapLocation.coord} historyEntry={(entryFor != null ? "found" : "null")} inputType={MegaCrit.Sts2.Core.Nodes.CommonUi.NControllerManager.Instance.InputType}");
     }
 }

@@ -112,7 +112,9 @@ object SyntheticData()
 }
 
 string Surface() => string.Join("\n", mod.GetExportedTypes().SelectMany(t => new[] { "type " + t.FullName }.Concat(t.GetMembers(BindingFlags.Public | BindingFlags.Static | BindingFlags.Instance | BindingFlags.DeclaredOnly).Where(m => m.MemberType != MemberTypes.NestedType).Select(m => t.FullName + " " + m.MemberType + " " + m))).Order(StringComparer.Ordinal));
-string Patches() => string.Join("\n", mod.GetTypes().SelectMany(t => t.GetCustomAttributesData().Where(a => a.AttributeType.FullName == "HarmonyLib.HarmonyPatch").Select(a => t.FullName + " " + a)).Order(StringComparer.Ordinal));
+// Keep the original baseline intact; the explicitly added handshake patch is
+// checked independently, including its resolved target and argument types.
+string Patches() => string.Join("\n", mod.GetTypes().Where(t => t.Name != "RestartProtocol_HandshakePatch").SelectMany(t => t.GetCustomAttributesData().Where(a => a.AttributeType.FullName == "HarmonyLib.HarmonyPatch").Select(a => t.FullName + " " + a)).Order(StringComparer.Ordinal));
 void Fixture(string name, byte[] bytes)
 {
     var path = Path.Combine(fixtures, name);
@@ -129,7 +131,7 @@ Check("Harmony registration order", () =>
 {
     var registration = mod.GetType("Retry.PatchRegistration");
     var types = registration == null ? mod.GetTypes() : ((IEnumerable<Type>)registration.GetMethod("TypesInOrder", all)!.Invoke(null, new object[] { mod })!).ToArray();
-    var patches = types.Where(t => t.GetCustomAttributesData().Any(a => a.AttributeType.FullName == "HarmonyLib.HarmonyPatch"));
+    var patches = types.Where(t => t.Name != "RestartProtocol_HandshakePatch" && t.GetCustomAttributesData().Any(a => a.AttributeType.FullName == "HarmonyLib.HarmonyPatch"));
     Fixture("harmony-registration-order.txt", Encoding.UTF8.GetBytes(string.Join("\n", patches.Select(t => t.FullName))));
 });
 Check("snapshot v5 binary fixture", () => Fixture("snapshot-v5.bin", (byte[])Call(codec, "SerializePayload", SyntheticData())!));
@@ -621,6 +623,7 @@ if (mode != "capture")
     });
 }
 
+CompatibilityChecks.Run(mod, Check);
 Console.WriteLine($"{checks - failures.Count}/{checks} checks passed");
 return failures.Count == 0 ? 0 : 1;
 public class MemoryStore : DispatchProxy

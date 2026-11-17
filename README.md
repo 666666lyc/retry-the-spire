@@ -4,7 +4,9 @@
 
 **[Steam 创意工坊](https://steamcommunity.com/sharedfiles/filedetails/?id=3813193061)** · **[最新版本](https://github.com/666666lyc/retry-the-spire/releases/latest)** · **[安装指南](INSTALL.md)**
 
-当前版本：**v0.7.1**
+当前版本：**v0.8.0**
+
+同一安装包适配正式版 **v0.111.1** 和 public-beta **v0.113.1**，包含愚者及 Dread／Blitz 模式。两条分支使用同一 DLL；多人玩家必须使用相同游戏版本。验证范围及待测项目见[回归记录](docs/TESTING.md)。
 
 [简体中文](#简体中文) | [English](#english)
 
@@ -54,7 +56,7 @@ Retry the Spire 提供三种重打方式，不必为了再试一次而放弃整�
 
 #### 多人模式——全员安装模组
 
-当所有在线玩家均使用 v0.5.0 或更高版本时，全员会保留当前网络连接并直接重载当前房间。
+当所有在线玩家均使用 v0.8.0 或更高版本时，全员会保留当前网络连接并直接重载当前房间。
 
 ![多人原房间直载](docs/assets/multiplayer-direct-retry.gif)
 
@@ -81,7 +83,7 @@ Retry the Spire 提供三种重打方式，不必为了再试一次而放弃整�
 
 | 场景 | 安装要求 | 结果 |
 | --- | --- | --- |
-| 当前房间重打，全员使用 v0.5.0+ | 所有在线玩家 | 不离开当前连接，所有玩家直接重载。 |
+| 当前房间重打，全员使用 v0.8.0+ | 所有在线玩家 | 不离开当前连接，所有玩家直接重载。 |
 | 当前房间重打，存在未安装玩家 | 仅房主必须安装 | 创建原生替换大厅；新版玩家自动重连，未安装玩家手动重进。 |
 | 恢复多人历史对局 | 仅房主必须安装 | 将记录重建为原生 `SerializableRun`，并打开标准读取对局大厅。 |
 
@@ -110,8 +112,11 @@ mods/
 
 ### 已知限制
 
+- v0.8.0 起保存完整的原生房间入口状态，包括新版 RNG 状态和计时。旧快照可继续读取坐标，但旧版原生玩家／地图数据无法安全解码时会使用历史重建；不会把旧 RNG 计数冒充精确状态。
+- 新增的完整快照带有游戏构建标记。切换分支或游戏更新后，若构建不匹配，会在放弃现有对局前停止恢复并保留数据；同一安装包兼容双分支不表示原生快照可跨版本互换。
+
 - v0.5.1 之前生成的历史对局若缺少房间快照，会使用尽力重建；无法准确还原的战斗内计数及随机结果可能与原对局不同。
-- Retry the Spire v0.4.x 使用不兼容的多人通信协议。加入当前版本房间前，请升级到 v0.5.0 或更高版本，或禁用旧版。
+- Retry the Spire v0.4.x 使用不兼容的多人通信协议。加入当前版本房间前，请升级到 v0.8.0 或更高版本，或禁用旧版。
 - 原版 Retry 与 Retry the Spire 无法同时运行。
 - 游戏会在加载模组时禁用成就。
 
@@ -152,7 +157,9 @@ Reroll a fight, retry the current room, or resume a *Slay the Spire 2* run from 
 
 **[Steam Workshop](https://steamcommunity.com/sharedfiles/filedetails/?id=3813193061)** · **[Latest release](https://github.com/666666lyc/retry-the-spire/releases/latest)** · **[Installation guide](INSTALL.md)**
 
-Current release: **v0.7.1**
+Current release: **v0.8.0**
+
+One package supports main branch **v0.111.1** and public-beta **v0.113.1**, including the Fool and Dread/Blitz modes. Both branches use the same DLL; multiplayer peers must use matching game builds. See the [verification record](docs/TESTING.md) for tested and pending scenarios.
 
 > [!IMPORTANT]
 > Retry the Spire is a modified fork of [sts2mods/Retry](https://github.com/sts2mods/Retry). Do not enable both mods at the same time: they patch the same screens and run-loading paths.
@@ -196,7 +203,7 @@ The **Retry** button reloads the native save captured when you entered the room.
 
 #### Multiplayer — everyone has the mod
 
-When every connected player uses v0.5.0 or newer, all players reload in place while keeping the current network connection.
+When every connected player uses v0.8.0 or newer, all players reload in place while keeping the current network connection.
 
 ![Multiplayer direct room retry](docs/assets/multiplayer-direct-retry.gif)
 
@@ -223,7 +230,7 @@ Snapshots are stored beside the active profile saves, allowing Steam Cloud to ca
 
 | Scenario | Required installs | Result |
 | --- | --- | --- |
-| Current-room retry, all peers on v0.5.0+ | Every connected player | The room reloads without leaving the current connection. |
+| Current-room retry, all peers on v0.8.0+ | Every connected player | The room reloads without leaving the current connection. |
 | Current-room retry with an unmodded peer | Host only | A native replacement lobby opens; updated peers reconnect automatically and unmodded players rejoin manually. |
 | Resume a multiplayer history entry | Host only | The run is rebuilt as a native `SerializableRun` and opened in the standard load-run lobby. |
 
@@ -252,8 +259,11 @@ mods/
 
 ### Limitations
 
+- Starting with v0.8.0, room snapshots include complete native run state, the new RNG state words, and the room-entry timer. Legacy coordinates remain readable; incompatible old player/map blobs use history reconstruction. Old counters alone are never treated as exact RNG state.
+- Complete snapshots are tagged with their game build. A mismatched build stops restoration before abandoning an existing run and retains the original data. Sharing one mod package between branches does not make native snapshots interchangeable between game builds.
+
 - Historical runs created before v0.5.1 use best-effort reconstruction when a room snapshot is unavailable; combat-only counters and RNG may diverge.
-- Retry the Spire v0.4.x uses an incompatible multiplayer protocol. Upgrade it to v0.5.0 or newer, or disable it before joining a current room.
+- Retry the Spire v0.4.x uses an incompatible multiplayer protocol. Upgrade it to v0.8.0 or newer, or disable it before joining a current room.
 - The original Retry and Retry the Spire are mutually exclusive at runtime.
 - The game disables achievements while mods are loaded.
 

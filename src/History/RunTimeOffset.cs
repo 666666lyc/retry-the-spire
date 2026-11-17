@@ -7,11 +7,8 @@
 // "if you pick the node you died on, start with the full timer"
 // preference.
 //
-// Implementation: RunManager.RunTime is computed as
-//   now - _sessionStartTime + _prevRunTime
-// _sessionStartTime is set to "now" during InitializeShared, and
-// _prevRunTime is loaded from the SerializableRun (0 for a fresh
-// run). Both are private — we set _prevRunTime via reflection.
+// The current game adds _prevSessionRunTime to its active-session clock,
+// which also accounts for paused time. Only change that historical offset.
 using System;
 using System.Reflection;
 using Godot;
@@ -21,13 +18,12 @@ namespace Retry;
 
 public static class RunTimeOffset
 {
-    private static readonly FieldInfo? PrevRunTimeField = typeof(RunManager).GetField("_prevRunTime", BindingFlags.NonPublic | BindingFlags.Instance);
+    private static readonly FieldInfo? PrevRunTimeField = typeof(RunManager).GetField("_prevSessionRunTime", BindingFlags.NonPublic | BindingFlags.Instance);
     public static void Apply(RetryTarget target)
     {
         if (PrevRunTimeField == null)
         {
-            GD.PrintErr($"{RetryMod.LogPrefix}timer offset: _prevRunTime field missing");
-            return;
+            throw new MissingFieldException(typeof(RunManager).FullName, "_prevSessionRunTime");
         }
 
         var rm = RunManager.Instance;

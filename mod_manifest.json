@@ -3,7 +3,8 @@
   "name": "Retry the Spire",
   "author": "666666lyc (fork maintainer); original by Austin/sts2mods",
   "description": "Reroll combat encounters or draw order, retry the current room, and resume past runs from visited nodes. Supports solo and host-controlled multiplayer retries.",
-  "version": "0.7.1",
+  "version": "0.8.0",
+  "min_game_version": "0.111.1",
   "has_pck": false,
   "has_dll": true,
   "affects_gameplay": false

@@ -1,0 +1,15 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <TargetFramework>net9.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <AssemblyName>CompatibilitySmoke</AssemblyName>
+    <STS2GameDataDir Condition="'$(STS2GameDataDir)' == ''">$(STS2GameDir)/data_sts2_windows_x86_64</STS2GameDataDir>
+  </PropertyGroup>
+  <ItemGroup>
+    <ProjectReference Include="../../RetryTheSpire.csproj" />
+    <Reference Include="sts2"><HintPath>$(STS2GameDataDir)/sts2.dll</HintPath><Private>false</Private></Reference>
+    <Reference Include="GodotSharp"><HintPath>$(STS2GameDataDir)/GodotSharp.dll</HintPath><Private>false</Private></Reference>
+    <Reference Include="0Harmony"><HintPath>$(STS2GameDataDir)/0Harmony.dll</HintPath><Private>false</Private></Reference>
+  </ItemGroup>
+</Project>

@@ -63,6 +63,7 @@ public static class RetryRunner
         // tears the run down.
         try
         {
+            NativeRunSnapshot.ValidateForRestore(history.StartTime, history.Seed, actIndex, floorIndex);
             bool inProgress = RunManager.Instance?.IsInProgress == true;
             bool hasSave = SaveManager.Instance?.HasRunSave == true;
             if (inProgress || hasSave)
@@ -92,6 +93,8 @@ public static class RetryRunner
         catch (Exception ex)
         {
             GD.PrintErr($"{RetryMod.LogPrefix}Begin guard: {ex.Message}");
+            OneButtonNotice.Show("重打 / Retry", ex.Message, "OK", () => { });
+            return;
         }
 
         BeginInternal(history, player, actIndex, floorIndex, targetCoord);
@@ -114,6 +117,7 @@ public static class RetryRunner
     // startup cloud-sync cannot surface a save between two separate calls.
     public static void BeginForAutomatedTest(RunHistory history, RunHistoryPlayer player, int actIndex, int floorIndex, MapCoord? targetCoord)
     {
+        NativeRunSnapshot.ValidateForRestore(history.StartTime, history.Seed, actIndex, floorIndex);
         bool inProgress = RunManager.Instance?.IsInProgress == true;
         if (inProgress || SaveManager.Instance?.HasRunSave == true)
             RunAbandonment.PerformAbandon(writeHistory: true, inProgress: inProgress);

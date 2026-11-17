@@ -45,7 +45,7 @@ internal static class RestartPacketSender
             case NetHostGameService host:
                 if (HostTransportField?.GetValue(host)is not NetHost netHost)
                     throw new MissingFieldException(typeof(NetHostGameService).FullName, "_netHost");
-                if (RunManager.Instance?.RunLobby?.ConnectedPlayerIds.Contains(target) != true)
+                if (RunManager.Instance?.RunLobby?.PlayerIds.Contains(target) != true)
                     throw new InvalidOperationException($"raw target {target} is not in the current run lobby");
                 if (!netHost.ConnectedPeerIds.Contains(target))
                     throw new InvalidOperationException($"raw target {target} is not connected");

@@ -45,6 +45,7 @@ public sealed class PlayerStateSnapshot
 
 public sealed class RetryTarget
 {
+    internal bool IsCustomGame;
     // Run-level metadata
     public string Seed = "";
     public long SourceStartTime;

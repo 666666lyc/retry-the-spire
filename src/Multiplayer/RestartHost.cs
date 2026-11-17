@@ -45,7 +45,7 @@ internal sealed class RestartHost
         _session.Attempt.PendingDirectPrepare.Clear();
         _session.Attempt.SendRounds.Clear();
         _session.Attempt._directSave = directSave;
-        var connected = manager.RunLobby.ConnectedPlayerIds.Where(id => id != net.NetId).ToHashSet();
+        var connected = manager.RunLobby.PlayerIds.Where(id => id != net.NetId).ToHashSet();
         var compatible = _session.Connection.CapablePeers.Where(connected.Contains).ToHashSet();
         var undeclared = connected.Where(id => !_session.Connection.CapablePeers.Contains(id)).ToHashSet();
         var directCapable = _session.Connection.DirectCapablePeers.Where(connected.Contains).ToHashSet();
@@ -334,7 +334,7 @@ internal sealed class RestartHost
         var net = manager?.NetService;
         if (net?.Type != NetGameType.Host || manager?.RunLobby == null || _session.Attempt._hostId == 0)
             return;
-        foreach (ulong peer in _session.Connection.CapablePeers.Where(manager.RunLobby.ConnectedPlayerIds.Contains).ToArray())
+        foreach (ulong peer in _session.Connection.CapablePeers.Where(manager.RunLobby.PlayerIds.Contains).ToArray())
         {
             try
             {

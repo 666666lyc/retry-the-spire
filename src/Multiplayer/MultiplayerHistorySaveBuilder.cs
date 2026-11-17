@@ -41,10 +41,8 @@ internal static class MultiplayerHistorySaveBuilder
     {
         if (mainMenu == null)
             throw new InvalidOperationException("main menu node was not found");
-        if (history.GameMode != GameMode.Standard)
-            throw new InvalidOperationException("only Standard history runs can open an ascension-eligible lobby");
-        if (history.Modifiers.Count != 0)
-            throw new InvalidOperationException("history run has modifiers and cannot be hosted as a normal Standard run");
+        _ = GameCompatibility.RetryMode(history.GameMode, GameCompatibility.IsCustom(history));
+        NativeRunSnapshot.ValidateForRestore(history.StartTime, history.Seed, actIndex, floorIndex);
         if (history.Players.Count < 2)
             throw new InvalidOperationException("history run is not multiplayer");
         if (history.Players.All(p => p.Id != hostNetId))
@@ -75,9 +73,10 @@ internal static class MultiplayerHistorySaveBuilder
             Seed = history.Seed,
             SourceStartTime = history.StartTime,
             Ascension = history.Ascension,
-            GameMode = GameMode.Standard,
+            GameMode = history.GameMode,
+            IsCustomGame = GameCompatibility.IsCustom(history),
             ActIds = new List<ModelId>(history.Acts),
-            Modifiers = new List<SerializableModifier>(),
+            Modifiers = new List<SerializableModifier>(history.Modifiers),
             TargetActIndex = actIndex,
             TargetFloorIndex = floorIndex,
             MapPointHistorySoFar = TruncateHistoryIncludingTarget(history, actIndex, floorIndex),
@@ -100,6 +99,15 @@ internal static class MultiplayerHistorySaveBuilder
     internal static NativeSaveBuildResult BuildNativeSave(RunHistory history, RetryTarget target, int actIndex, int floorIndex, MapCoord targetCoord, IReadOnlyList<MapCoord> pathThroughTarget, ulong hostNetId)
     {
         RetryContext.ResetAll();
+        var native = NativeRunSnapshot.Find(history.StartTime, history.Seed, actIndex, floorIndex);
+        if (native != null)
+        {
+            native.StartTime = CreateRetryStartTime(history.StartTime);
+            GameCompatibility.PrepareHistoryMode(native);
+            ValidateNativeSave(native, history, targetCoord);
+            _ = RunState.FromSerializable(native);
+            return new NativeSaveBuildResult { Save = native };
+        }
         var players = new List<Player>(history.Players.Count);
         foreach (var hp in history.Players)
         {
@@ -110,29 +118,8 @@ internal static class MultiplayerHistorySaveBuilder
         var acts = new List<ActModel>(history.Acts.Count);
         foreach (var id in history.Acts)
             acts.Add(ModelDb.GetById<ActModel>(id).ToMutable());
-        var runState = RunState.CreateForNewRun(players, acts, new List<ModifierModel>(), GameMode.Standard, history.Ascension, history.Seed);
+        var runState = GameCompatibility.CreateForNewRun(players, acts, history.Modifiers.Select(ModifierModel.FromSerializable).ToList(), history.GameMode, history.Ascension, history.Seed, GameCompatibility.IsCustom(history));
         runState.ExtraFields.StartedWithNeow = true;
-        // Prefer the exact native maps captured at room entry. Old v4
-        // sidecars have no map blob, so they retain the deterministic
-        // regeneration fallback and exact historical path normalization.
-        for (int i = 0; i <= actIndex; i++)
-        {
-            runState.CurrentActIndex = i;
-            var generated = RngSnapshotStore.TryCreateSavedActMap(target.SourceStartTime, target.Seed, i) ?? runState.Acts[i].CreateMap(runState, replaceTreasureWithElites: false);
-            if (i == actIndex)
-                runState.Map = generated;
-        }
-
-        runState.CurrentActIndex = actIndex;
-        runState.ActFloor = floorIndex;
-        if (!RngSnapshotStore.HasMapSnapshot(target.SourceStartTime, target.Seed, actIndex))
-        {
-            var currentEntries = target.MapPointHistorySoFar[actIndex];
-            var exactPath = pathThroughTarget.Select(coord => runState.Map!.GetAllMapPoints().Append(runState.Map.StartingMapPoint).FirstOrDefault(point => point.coord.row == coord.row && point.coord.col == coord.col)).Where(point => point != null).Cast<MapPoint>().ToList();
-            int normalized = MapPathSearch.NormalizeHistoricalTypes(exactPath, currentEntries);
-            GD.PrintErr($"{RetryMod.LogPrefix}multiplayer warning: exact map snapshot unavailable; " + $"normalized {normalized} visited node types");
-        }
-
         // Close() restored the real local id and removed the browser's fake
         // net service. Reinstall a no-save service only long enough for the
         // game's own ToSave implementation to serialize all native fields.
@@ -141,6 +128,28 @@ internal static class MultiplayerHistorySaveBuilder
         try
         {
             RunManager.Instance.SetUpNewSingleplayer(runState, shouldSave: false);
+            // Prefer the exact native maps captured at room entry. Old v4
+            // sidecars have no map blob, so they retain the deterministic
+            // regeneration fallback and exact historical path normalization.
+            for (int i = 0; i <= actIndex; i++)
+            {
+                runState.CurrentActIndex = i;
+                var generated = RngSnapshotStore.TryGetActMap(target.SourceStartTime, target.Seed, i, out var savedMap) && savedMap != null
+                    ? GameCompatibility.RestoreMap(savedMap, runState) : GameCompatibility.CreateMap(runState);
+                if (i == actIndex)
+                    runState.Map = generated;
+            }
+
+            runState.CurrentActIndex = actIndex;
+            runState.ActFloor = floorIndex;
+            if (!RngSnapshotStore.HasMapSnapshot(target.SourceStartTime, target.Seed, actIndex))
+            {
+                var currentEntries = target.MapPointHistorySoFar[actIndex];
+                var exactPath = pathThroughTarget.Select(coord => runState.Map!.GetAllMapPoints().Append(runState.Map.StartingMapPoint).FirstOrDefault(point => point.coord.row == coord.row && point.coord.col == coord.col)).Where(point => point != null).Cast<MapPoint>().ToList();
+                int normalized = MapPathSearch.NormalizeHistoricalTypes(exactPath, currentEntries);
+                GD.PrintErr($"{RetryMod.LogPrefix}multiplayer warning: exact map snapshot unavailable; " + $"normalized {normalized} visited node types");
+            }
+
             RunManager.Instance.Launch();
             foreach (var snapshot in target.Players)
                 InventoryInjector.Apply(runState, snapshot, silent: true);
@@ -164,8 +173,9 @@ internal static class MultiplayerHistorySaveBuilder
             RunTimeOffset.Apply(target);
             var save = RunManager.Instance.ToSave(preFinishedRoom: null);
             // Explicitly stamp the progression-safe contract after ToSave.
-            save.GameMode = GameMode.Standard;
-            save.Modifiers = new List<SerializableModifier>();
+            save.GameMode = GameCompatibility.RetryMode(history.GameMode, GameCompatibility.IsCustom(history));
+            save.Modifiers = new List<SerializableModifier>(history.Modifiers);
+            GameCompatibility.SetCustom(save, GameCompatibility.IsCustom(history) || history.Modifiers.Count != 0 || history.GameMode.ToString() == "Daily");
             save.Ascension = history.Ascension;
             save.CurrentActIndex = actIndex;
             save.PlatformType = history.PlatformType;
@@ -185,7 +195,7 @@ internal static class MultiplayerHistorySaveBuilder
 
             RngSnapshotStore.CopyExactCoordinates(target.SourceStartTime, save.StartTime, target.Seed, actIndex, floorIndex + 1);
             RngSnapshotStore.CaptureCoordinates(save.StartTime, target.Seed, actIndex, pathThroughTarget);
-            RngSnapshotStore.Capture(save.StartTime, runState.Rng.StringSeed, actIndex, floorIndex, targetCoord, runState.Rng.ToSerializable().Counters, runState.Players.Select(player => player.ToSerializable()).ToList());
+            RngSnapshotStore.Capture(save.StartTime, runState.Rng.StringSeed, actIndex, floorIndex, targetCoord, GameCompatibility.Counters(runState.Rng.ToSerializable()), runState.Players.Select(player => player.ToSerializable()).ToList());
             ValidateNativeSave(save, history, targetCoord);
             var serializedWarning = ValidateSerializedTargetRoomContract(save, actIndex, targetCoord, roomContract);
             var warning = CombineWarnings(roomContract.Warning, serializedWarning);
@@ -415,8 +425,9 @@ internal static class MultiplayerHistorySaveBuilder
 
     internal static void ValidateNativeSave(SerializableRun save, RunHistory history, MapCoord targetCoord)
     {
-        if (save.GameMode != GameMode.Standard || save.Modifiers.Count != 0)
-            throw new InvalidOperationException("generated save is not an unmodified Standard run");
+        if (save.GameMode != GameCompatibility.RetryMode(history.GameMode, GameCompatibility.IsCustom(history))
+            || save.Modifiers.Count != history.Modifiers.Count)
+            throw new InvalidOperationException("generated save changed the historical game mode or modifiers");
         if (save.PreFinishedRoom != null)
             throw new InvalidOperationException("generated save unexpectedly contains a pre-finished room");
         if (save.Players.Count != history.Players.Count)

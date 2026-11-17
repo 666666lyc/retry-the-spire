@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.IO;
 using System.IO.Compression;
 using System.Linq;
+using System.Text;
 using System.Text.Json;
 using System.Text.Json.Serialization;
 using Godot;
@@ -45,11 +46,16 @@ internal static class SnapshotLegacyMigration
             room.Counters = new Dictionary<RunRngType, int>(item.Value.Counters);
             if (!string.IsNullOrEmpty(item.Value.PlayersJson))
             {
+                // Retain the original JSON even if its old RNG/player shape
+                // cannot be upgraded by this game's native serializer.
+                int original = SnapshotIndex.AddPlayerBlob(Encoding.UTF8.GetBytes("RTS-LEGACY-PLAYER-JSON-4\n" + item.Value.PlayersJson));
+                room.PlayerBlobIds.Add(original);
                 try
                 {
                     var players = JsonSerializer.Deserialize<List<SerializablePlayer>>(item.Value.PlayersJson, JsonSerializationUtility.Options);
                     if (players != null)
-                        room.PlayerBlobIds = players.Select(p => SnapshotIndex.AddPlayerBlob(SnapshotNativeSerializer.SerializeNative(p))).ToList();
+                        room.PlayerBlobIds.AddRange(players.Where(p => p.Rng?.Rngs.Count > 0)
+                            .Select(p => SnapshotIndex.AddPlayerBlob(SnapshotNativeSerializer.SerializeNative(p))));
                 }
                 catch (Exception ex)
                 {

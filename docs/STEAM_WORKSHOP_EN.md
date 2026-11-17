@@ -52,7 +52,7 @@ Restart immediately from the room entrance.
 
 [h3]Multiplayer: everyone has the mod[/h3]
 
-When every connected player uses v0.5.0 or newer, all players reload in place while keeping the current connection.
+When every connected player uses v0.8.0 or newer, all players reload in place while keeping the current connection.
 
 [img]https://images.steamusercontent.com/ugc/18351087105714867667/CBF7C67E42B967B77CC76A3497CA376B4C2ACA9F/[/img]
 
@@ -91,7 +91,7 @@ Room snapshots are stored beside the active profile saves, allowing Steam Cloud 
 [*]Unmodded players can still join normally and manually rejoin the native replacement lobby after a retry.
 [*]Gameplay or content mods that register game models must still match on every multiplayer client.
 [*]Cosmetic or non-gameplay mods may differ.
-[*]v0.4.x uses an incompatible multiplayer protocol. Upgrade to v0.5.0 or newer, or disable the old version before joining a current room.
+[*]v0.4.x uses an incompatible multiplayer protocol. Upgrade to v0.8.0 or newer, or disable the old version before joining a current room.
 [/list]
 
 [h1]Source and feedback[/h1]

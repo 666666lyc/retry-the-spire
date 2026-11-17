@@ -320,7 +320,7 @@ internal static class HistoryNavigation
         try
         {
             long destinationStartTime = RngSnapshotStore.GetCurrentRunStartTime();
-            RngSnapshotStore.Capture(destinationStartTime, runState.Rng.StringSeed, target.TargetActIndex, target.TargetFloorIndex, targetCoord, runState.Rng.ToSerializable().Counters, runState.Players.Select(player => player.ToSerializable()).ToList());
+            RngSnapshotStore.Capture(destinationStartTime, runState.Rng.StringSeed, target.TargetActIndex, target.TargetFloorIndex, targetCoord, GameCompatibility.Counters(runState.Rng.ToSerializable()), runState.Players.Select(player => player.ToSerializable()).ToList());
         }
         catch (Exception ex)
         {

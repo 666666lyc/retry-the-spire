@@ -65,6 +65,7 @@ internal static class HistoryTargetBuilder
             SourceStartTime = history.StartTime,
             Ascension = history.Ascension,
             GameMode = history.GameMode,
+            IsCustomGame = GameCompatibility.IsCustom(history),
             ActIds = new List<ModelId>(history.Acts),
             Modifiers = new List<SerializableModifier>(history.Modifiers),
             TargetActIndex = actIndex,

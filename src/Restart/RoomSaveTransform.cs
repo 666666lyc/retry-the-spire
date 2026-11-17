@@ -55,7 +55,7 @@ internal static class RoomSaveTransform
             RoomType.Boss => liveState.Act.AllBossEncounters,
             _ => Array.Empty<EncounterModel>(),
         };
-        var candidates = pool.Where(encounter => !encounter.IsDebugEncounter && encounter.Id != current.Id).GroupBy(encounter => encounter.Id).Select(group => group.First()).ToList();
+        var candidates = pool.Where(encounter => encounter.Id != current.Id).GroupBy(encounter => encounter.Id).Select(group => group.First()).ToList();
         if (candidates.Count == 0)
             throw new InvalidOperationException("当前章节没有其他同层级遭遇可供重掷。");
         var selected = candidates[System.Security.Cryptography.RandomNumberGenerator.GetInt32(candidates.Count)];
@@ -136,14 +136,16 @@ internal static class RoomSaveTransform
     internal static void RerollShuffle(SerializableRun save, RunState liveState)
     {
         var rng = save.SerializableRng ?? throw new InvalidOperationException("房间入口存档缺少随机数状态。");
-        rng.Counters.TryGetValue(RunRngType.Shuffle, out int savedCounter);
+        if (!rng.Rngs.TryGetValue(RunRngType.Shuffle, out var shuffle))
+            throw new InvalidOperationException("房间入口存档缺少洗牌随机数状态。");
+        int savedCounter = shuffle.counter;
         string key = ShuffleCounterKey(save, liveState);
         int lastCounter = LastShuffleCounters.TryGetValue(key, out int used) ? used : savedCounter;
         int baseCounter = Math.Max(savedCounter, lastCounter);
         if (baseCounter == int.MaxValue)
             throw new InvalidOperationException("洗牌随机数计数已达到上限。");
         int nextCounter = baseCounter + 1;
-        rng.Counters[RunRngType.Shuffle] = nextCounter;
+        AdvanceShuffle(rng, nextCounter);
         LastShuffleCounters[key] = nextCounter;
         GD.Print($"{RetryMod.LogPrefix}shuffle reroll: {savedCounter} -> {nextCounter} key={key}");
     }
@@ -156,9 +158,21 @@ internal static class RoomSaveTransform
         string key = ShuffleCounterKey(save, liveState);
         if (!LastShuffleCounters.TryGetValue(key, out int lastCounter))
             return;
-        rng.Counters.TryGetValue(RunRngType.Shuffle, out int savedCounter);
+        if (!rng.Rngs.TryGetValue(RunRngType.Shuffle, out var shuffle))
+            throw new InvalidOperationException("房间入口存档缺少洗牌随机数状态。");
+        int savedCounter = shuffle.counter;
         if (lastCounter > savedCounter)
-            rng.Counters[RunRngType.Shuffle] = lastCounter;
+            AdvanceShuffle(rng, lastCounter);
+    }
+
+    internal static void AdvanceShuffle(MegaCrit.Sts2.Core.Saves.Runs.SerializableRunRngSet save, int targetCounter)
+    {
+        if (!save.Rngs.TryGetValue(RunRngType.Shuffle, out var state) || targetCounter < state.counter)
+            throw new InvalidOperationException("Invalid shuffle RNG state or counter");
+        var rng = new MegaCrit.Sts2.Core.Random.Rng(state);
+        for (int counter = state.counter; counter < targetCounter; counter++)
+            rng.NextUnsignedLong();
+        save.Rngs[RunRngType.Shuffle] = rng.ToSerializable();
     }
 
     internal static string ShuffleCounterKey(SerializableRun save, RunState liveState)

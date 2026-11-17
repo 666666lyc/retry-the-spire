@@ -43,7 +43,7 @@ public static class StateReconstructor
 
         GD.Print($"{RetryMod.LogPrefix}player snapshot unavailable: netId={player.Id} act={targetActIndex} floor={targetFloorIndex}; falling back to history reconstruction");
         int basePotionSlots = Player.initialMaxPotionSlotCount;
-        var ascension = new AscensionManager(history.Ascension);
+        var ascension = GameCompatibility.Ascension(history.GameMode, history.Ascension);
         bool tightBelt = ascension.HasLevel(AscensionLevel.TightBelt);
         if (tightBelt)
             basePotionSlots--;

@@ -41,7 +41,7 @@ public static class RunState_AddVisitedMapCoord_Patch
         try
         {
             var rng = __instance.Rng;
-            var counters = rng.ToSerializable().Counters;
+            var counters = GameCompatibility.Counters(rng.ToSerializable());
             int floor = __instance.MapPointHistory.Count > __instance.CurrentActIndex ? __instance.MapPointHistory[__instance.CurrentActIndex].Count : 0;
             long startTime = RngSnapshotStore.GetCurrentRunStartTime();
             if (startTime <= 0)

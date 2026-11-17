@@ -5,10 +5,11 @@
     <AssemblyName>RetryTheSpire</AssemblyName>
     <RootNamespace>Retry</RootNamespace>
     <PackageId>RetryTheSpire</PackageId>
-    <Version>0.7.1</Version>
+    <Version>0.8.0</Version>
     <PackageLicenseExpression>MIT</PackageLicenseExpression>
     <Nullable>enable</Nullable>
     <EnableDefaultCompileItems>false</EnableDefaultCompileItems>
+    <EnableDefaultNoneItems>false</EnableDefaultNoneItems>
     <STS2GameDir Condition="'$(STS2GameDir)' == ''">$(STS2_GAME_DIR)</STS2GameDir>
     <LangVersion>12.0</LangVersion>
     <Deterministic>true</Deterministic>

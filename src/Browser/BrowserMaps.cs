@@ -50,7 +50,7 @@ internal sealed class BrowserMaps
         var actsList = new List<ActModel>();
         foreach (var id in _session._history.Acts)
             actsList.Add(ModelDb.GetById<ActModel>(id).ToMutable());
-        _session._runState = RunState.CreateForNewRun(players, actsList, new List<ModifierModel>(), _session._history.GameMode, _session._history.Ascension, _session._history.Seed);
+        _session._runState = GameCompatibility.CreateForNewRun(players, actsList, _session._history.Modifiers.Select(ModifierModel.FromSerializable).ToList(), _session._history.GameMode, _session._history.Ascension, _session._history.Seed, GameCompatibility.IsCustom(_session._history));
         // Populate _mapPointHistory from the saved history so
         // NMapPoint.OnFocus → GetHistoryEntryFor returns real data
         // and the hover tooltip (NMapPointHistoryHoverTip) displays
@@ -126,11 +126,12 @@ internal sealed class BrowserMaps
             return (null, new());
         SetCurrentActIndex(actIdx);
         var act = _session._runState.Acts[actIdx];
-        var map = RngSnapshotStore.TryCreateSavedActMap(_session._history.StartTime, _session._history.Seed, actIdx);
+        var map = RngSnapshotStore.TryGetActMap(_session._history.StartTime, _session._history.Seed, actIdx, out var savedMap) && savedMap != null
+            ? GameCompatibility.RestoreMap(savedMap, _session._runState) : null;
         bool restoredExactMap = map != null;
         if (map == null)
         {
-            map = act.CreateMap(_session._runState, replaceTreasureWithElites: false);
+            map = GameCompatibility.CreateMap(_session._runState);
             GD.PrintErr($"{RetryMod.LogPrefix}browser warning: exact map snapshot unavailable for act={actIdx}; " + "unvisited branches are regenerated");
         }
         else

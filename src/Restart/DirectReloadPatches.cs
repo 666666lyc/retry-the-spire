@@ -44,7 +44,7 @@ internal sealed class DirectLoadRunLobbyListener : ILoadRunLobbyListener
     {
     }
 
-    public void PlayerConnected(ulong playerId)
+    public void PlayerConnected(LoadRunLobbyPlayer player)
     {
     }
 

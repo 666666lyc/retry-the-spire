@@ -145,7 +145,7 @@ public static class AutoTestHarness
 
             long startTime = RngSnapshotStore.GetCurrentRunStartTime();
             var coord = state.VisitedMapCoords.LastOrDefault();
-            RngSnapshotStore.Capture(startTime, state.Rng.StringSeed, target.TargetActIndex, target.TargetFloorIndex, coord, state.Rng.ToSerializable().Counters, state.Players.Select(p => p.ToSerializable()).ToList(), state.Map);
+            RngSnapshotStore.Capture(startTime, state.Rng.StringSeed, target.TargetActIndex, target.TargetFloorIndex, coord, GameCompatibility.Counters(state.Rng.ToSerializable()), state.Players.Select(p => p.ToSerializable()).ToList(), state.Map);
             GD.Print($"{RetryMod.LogPrefix}auto-test: captured exact golden state startTime={startTime}");
             RetryRunner.PerformAbandon(writeHistory: true, inProgress: true);
             string fileName = startTime + ".run";
@@ -274,7 +274,7 @@ public static class AutoTestHarness
 
             long startTime = RngSnapshotStore.GetCurrentRunStartTime();
             var coord = state.VisitedMapCoords.LastOrDefault();
-            RngSnapshotStore.Capture(startTime, state.Rng.StringSeed, act, floor, coord, state.Rng.ToSerializable().Counters, state.Players.Select(p => p.ToSerializable()).ToList(), state.Map);
+            RngSnapshotStore.Capture(startTime, state.Rng.StringSeed, act, floor, coord, GameCompatibility.Counters(state.Rng.ToSerializable()), state.Players.Select(p => p.ToSerializable()).ToList(), state.Map);
             GD.Print($"{RetryMod.LogPrefix}auto-test sequence: captured exact golden state startTime={startTime}");
             RetryRunner.PerformAbandon(writeHistory: true, inProgress: true);
             string fileName = startTime + ".run";

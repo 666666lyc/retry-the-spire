@@ -62,7 +62,7 @@ internal sealed class RestartLobby
         _session.Attempt.CurrentPhase = Phase.WaitingForPlayers;
         ulong host = lobby.NetService.NetId;
         ulong[] expected = lobby.Run.Players.Select(p => p.NetId).Distinct().ToArray();
-        if (expected.Length == 0 || expected.Any(id => !lobby.ConnectedPlayerIds.Contains(id)))
+        if (expected.Length == 0 || expected.Any(id => !lobby.PlayerIds.Contains(id)))
             return;
         if (expected.Where(id => id != host).Any(id => !lobby.IsPlayerReady(id)))
             return;

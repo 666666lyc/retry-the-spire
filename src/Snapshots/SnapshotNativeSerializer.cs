@@ -1,4 +1,7 @@
 using System;
+using System.IO;
+using System.Text;
+using System.Text.Json;
 using MegaCrit.Sts2.Core.Multiplayer.Serialization;
 using MegaCrit.Sts2.Core.Saves.Runs;
 
@@ -8,16 +11,12 @@ internal static class SnapshotNativeSerializer
 {
     internal static byte[] SerializeNative(SerializableActMap map)
     {
-        var writer = new PacketWriter();
-        map.Serialize(writer);
-        return CopyWrittenBytes(writer);
+        return Encode(map);
     }
 
     internal static byte[] SerializeNative(SerializablePlayer player)
     {
-        var writer = new PacketWriter();
-        player.Serialize(writer);
-        return CopyWrittenBytes(writer);
+        return Encode(player);
     }
 
     internal static byte[] CopyWrittenBytes(PacketWriter writer)
@@ -30,19 +29,30 @@ internal static class SnapshotNativeSerializer
 
     internal static SerializableActMap DeserializeMap(byte[] blob)
     {
-        var result = new SerializableActMap();
-        var reader = new PacketReader();
-        reader.Reset(blob);
-        result.Deserialize(reader);
-        return result;
+        return Decode<SerializableActMap>(blob);
     }
 
     internal static SerializablePlayer DeserializePlayer(byte[] blob)
     {
-        var result = new SerializablePlayer();
-        var reader = new PacketReader();
-        reader.Reset(blob);
-        result.Deserialize(reader);
-        return result;
+        return Decode<SerializablePlayer>(blob);
+    }
+
+    private static readonly byte[] Header = Encoding.ASCII.GetBytes("RTS-NATIVE-JSON-1\n");
+    private static byte[] Encode<T>(T value)
+    {
+        using var output = new MemoryStream();
+        output.Write(Header);
+        output.Write(typeof(SerializablePlayer).Assembly.ManifestModule.ModuleVersionId.ToByteArray());
+        output.Write(JsonSerializer.SerializeToUtf8Bytes(value, MegaCrit.Sts2.Core.Saves.JsonSerializationUtility.Options));
+        return output.ToArray();
+    }
+
+    private static T Decode<T>(byte[] blob)
+    {
+        if (blob.Length <= Header.Length + 16 || !blob.AsSpan().StartsWith(Header)
+            || new Guid(blob.AsSpan(Header.Length, 16)) != typeof(SerializablePlayer).Assembly.ManifestModule.ModuleVersionId)
+            throw new InvalidDataException("Native blob is from an older/different game build; retaining it and using history reconstruction");
+        return JsonSerializer.Deserialize<T>(blob.AsSpan(Header.Length + 16), MegaCrit.Sts2.Core.Saves.JsonSerializationUtility.Options)
+            ?? throw new InvalidDataException("Native snapshot JSON was empty");
     }
 }

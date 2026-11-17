@@ -1,0 +1,98 @@
+name: Publish Retry the Spire v0.8.0
+
+on:
+  push:
+    branches: [main]
+    paths: [.github/workflows/publish-v0.8.0.yml]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: publish-retry-the-spire-v0.8.0
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: Publish the locally verified product artifacts
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const fs = require('node:fs');
+            const crypto = require('node:crypto');
+            const { owner, repo } = context.repo;
+            const tag = 'v0.8.0';
+            const title = 'Retry the Spire v0.8.0';
+            const sha256 = bytes => crypto.createHash('sha256').update(bytes).digest('hex');
+            const expectedZipHash = '125c35b76b4c6c745d1e81cfb5e2f28ae030bdabbbf0c3f560a092c5ce7c3821';
+            // Artifact blobs are uploaded separately, never added to a source tree.
+            // This job publishes the exact locally tested ZIP without game DLLs.
+            async function getBlob(sha) {
+              const { data } = await github.rest.git.getBlob({ owner, repo, file_sha: sha });
+              if (data.encoding !== 'base64') throw new Error('Unexpected Git blob encoding');
+              return Buffer.from(data.content, 'base64');
+            }
+            const zip = await getBlob('eedc3dbec4ae121774f7497024814cc8d973ad31');
+            const sums = await getBlob('9bfe917d260c677f4a10fb349a6f2352d6dbb1cb');
+            if (sha256(zip) !== expectedZipHash) throw new Error('Product ZIP checksum mismatch');
+            if (sums.toString('ascii').trim() !== `${expectedZipHash}  RetryTheSpire-v0.8.0.zip`)
+              throw new Error('Checksum file mismatch');
+            const body = fs.readFileSync('docs/releases/v0.8.0.md', 'utf8');
+
+            let tagRef;
+            try {
+              tagRef = (await github.rest.git.getRef({ owner, repo, ref: `tags/${tag}` })).data;
+            } catch (error) {
+              if (error.status !== 404) throw error;
+            }
+            if (tagRef) {
+              if (tagRef.object.type !== 'tag') throw new Error('Expected an annotated version tag');
+              const existingTag = (await github.rest.git.getTag({ owner, repo, tag_sha: tagRef.object.sha })).data;
+              if (existingTag.object.sha !== context.sha) throw new Error('Version tag points to another source commit');
+            } else {
+              const annotated = (await github.rest.git.createTag({ owner, repo, tag, message: title, object: context.sha, type: 'commit' })).data;
+              await github.rest.git.createRef({ owner, repo, ref: `refs/tags/${tag}`, sha: annotated.sha });
+            }
+
+            let release;
+            try {
+              release = (await github.rest.repos.getReleaseByTag({ owner, repo, tag })).data;
+            } catch (error) {
+              if (error.status !== 404) throw error;
+              release = (await github.rest.repos.createRelease({ owner, repo, tag_name: tag,
+                target_commitish: context.sha, name: title, body, draft: true, prerelease: false })).data;
+            }
+            const artifacts = [
+              { name: 'RetryTheSpire-v0.8.0.zip', bytes: zip, contentType: 'application/zip' },
+              { name: 'SHA256SUMS.txt', bytes: sums, contentType: 'text/plain' },
+            ];
+            for (const artifact of artifacts) {
+              const existing = release.assets.find(asset => asset.name === artifact.name);
+              if (existing) {
+                if (existing.size !== artifact.bytes.length || existing.digest !== `sha256:${sha256(artifact.bytes)}`)
+                  throw new Error(`Existing release asset does not match: ${artifact.name}`);
+                continue;
+              }
+              await github.rest.repos.uploadReleaseAsset({ owner, repo, release_id: release.id,
+                name: artifact.name, data: artifact.bytes,
+                headers: { 'content-type': artifact.contentType, 'content-length': artifact.bytes.length } });
+            }
+            const actual = (await github.rest.repos.getRelease({ owner, repo, release_id: release.id })).data;
+            if (actual.assets.length !== artifacts.length) throw new Error('Unexpected release asset count');
+            for (const artifact of artifacts) {
+              const asset = actual.assets.find(value => value.name === artifact.name);
+              if (!asset || asset.size !== artifact.bytes.length || asset.digest !== `sha256:${sha256(artifact.bytes)}`)
+                throw new Error(`Uploaded release asset failed verification: ${artifact.name}`);
+            }
+            const published = (await github.rest.repos.updateRelease({ owner, repo, release_id: release.id,
+              name: title, body, draft: false, prerelease: false, make_latest: 'true' })).data;
+            core.notice(`Published ${published.html_url} from ${context.sha}`);
+            await core.summary.addHeading(title).addLink('Release', published.html_url)
+              .addRaw(`\n\nSource: ${context.sha}\n\nZIP SHA-256: ${expectedZipHash}\n`).write();

@@ -62,6 +62,25 @@ internal static class SingleplayerHistoryLauncher
                 return;
             }
 
+            var native = NativeRunSnapshot.Find(target.SourceStartTime, target.Seed, target.TargetActIndex, target.TargetFloorIndex);
+            if (native != null)
+            {
+                if (native.Players.Count != 1 || native.Players[0].NetId != target.Player.NetId)
+                    throw new InvalidOperationException("Native snapshot player differs from the selected history");
+                native.StartTime = MultiplayerHistorySaveBuilder.CreateRetryStartTime(target.SourceStartTime);
+                GameCompatibility.PrepareHistoryMode(native);
+                var restored = RunState.FromSerializable(native); // Validate before writing the destination slot.
+                RetryContext.SkipNextNeowEntry = false;
+                for (int act = 0; act <= target.TargetActIndex; act++)
+                    RngSnapshotStore.CopyExactCoordinates(target.SourceStartTime, native.StartTime, target.Seed, act,
+                        act == target.TargetActIndex ? target.TargetFloorIndex + 1 : target.MapPointHistorySoFar[act].Count);
+                await RunManager.Instance.SetUpSavedSingleplayer(restored, native);
+                await NGame.Instance.LoadRun(restored, native.PreFinishedRoom);
+                RetryRunner.OnRetryCompleted(restored, target);
+                GD.Print($"{RetryMod.LogPrefix}native history retry loaded mode={restored.GameMode} timer={native.RunTime}");
+                return;
+            }
+
             var character = ModelDb.GetById<MegaCrit.Sts2.Core.Models.CharacterModel>(target.Player.CharacterId ?? ModelId.none);
             var acts = new List<MegaCrit.Sts2.Core.Models.ActModel>(target.ActIds.Count);
             foreach (var id in target.ActIds)
@@ -104,8 +123,7 @@ internal static class SingleplayerHistoryLauncher
             // prevented single-player history retries from unlocking the next
             // ascension level. Custom, daily, and modified histories remain
             // Custom so they cannot accidentally gain Standard progression.
-            var retryGameMode = target.GameMode == GameMode.Standard && target.Modifiers.Count == 0 ? GameMode.Standard : GameMode.Custom;
-            var runState = await NGame.Instance.StartNewSingleplayerRun(character, shouldSave: true, acts, modifiers, target.Seed, retryGameMode, target.Ascension);
+            var runState = await GameCompatibility.StartSingleplayer(character, acts, modifiers, target);
             // EnterAct(0) inside StartRun has already fired by now;
             // any later EnterMapCoord(StartingMapPoint) is OURS (e.g.
             // when the target IS the StartingMapPoint of a later act

@@ -72,7 +72,7 @@ internal sealed class RestartSession
                     return;
                 }
 
-                if (RunManager.Instance?.RunLobby?.ConnectedPlayerIds.Contains(senderId) != true)
+                if (RunManager.Instance?.RunLobby?.PlayerIds.Contains(senderId) != true)
                 {
                     LogReceiveDrop("Control", senderId, "capability-sender-not-in-run-lobby");
                     return;

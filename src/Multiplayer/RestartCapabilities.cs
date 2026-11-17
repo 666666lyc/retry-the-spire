@@ -1,6 +1,7 @@
 using System;
 using System.Linq;
 using System.Threading.Tasks;
+using System.Runtime.CompilerServices;
 using Godot;
 using MegaCrit.Sts2.Core.Multiplayer;
 using MegaCrit.Sts2.Core.Multiplayer.Game;
@@ -11,6 +12,13 @@ namespace Retry;
 
 internal sealed class RestartCapabilities
 {
+    private sealed record HostVersion(ulong Id, PeerVersionInfo Info);
+    private static readonly ConditionalWeakTable<NetClientGameService, HostVersion> HostVersions = new();
+    internal static void RecordHostVersion(NetClientGameService client, ulong peerId, PeerVersionInfo info)
+    {
+        HostVersions.Remove(client);
+        HostVersions.Add(client, new HostVersion(peerId, info));
+    }
     private readonly RestartSession _session;
     internal RestartCapabilities(RestartSession session) => _session = session;
     internal void BindToCurrentService()
@@ -35,8 +43,10 @@ internal sealed class RestartCapabilities
         // InitialGameInfo arrives while the host is still in its load lobby,
         // before the host has bound our run-time handler. Use it only as a
         // compatibility advertisement; actual negotiation starts after Launch.
-        _session.Connection._hostSupportsProtocol = message.otherMods?.Any(IsCompatibleVersion) == true;
         ulong hostId = flow.NetService is NetClientGameService client ? client.HostNetId : 0;
+        _session.Connection._hostSupportsProtocol = flow.NetService is NetClientGameService hostClient
+            && HostVersions.TryGetValue(hostClient, out var host) && host.Id == hostId
+            && host.Info.otherMods?.Any(IsCompatibleVersion) == true;
         _session.Connection._advertisedHostId = hostId;
         _session.Connection._advertisedService = flow.NetService;
         GD.Print($"{RetryMod.LogPrefix}restart event=host-capability-detected " + $"supported={_session.Connection._hostSupportsProtocol} host={hostId} trigger=initial-game-info");
